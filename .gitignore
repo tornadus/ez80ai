@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+venv/
+.claude/
+
+# Generated data
+training_data.txt
+
+# Model files
+*.pt
+*.npz
+
+# Built binaries
+bin/*.8xp
+bin/*.8xv
