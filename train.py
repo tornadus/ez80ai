@@ -390,7 +390,7 @@ def train(epochs=300, lr=0.002, save_best=False, batch_size=8192, quant_target_e
 
     model = model.to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=1e-4)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs, eta_min=lr*0.1)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs, eta_min=lr*0.02)
     criterion = nn.CrossEntropyLoss()
 
     interrupted = False
@@ -403,7 +403,7 @@ def train(epochs=300, lr=0.002, save_best=False, batch_size=8192, quant_target_e
 
             # QT ramp based on global epoch count so resume doesn't reset
             global_epoch = total_epochs + epoch
-            quant_temp = 0.3 + 0.7 * min(1.0, global_epoch / (quant_target_epoch * 0.5))
+            quant_temp = 0.3 + 0.7 * min(1.0, global_epoch / (quant_target_epoch * 0.4))
 
             # Shuffle indices each epoch (on GPU to avoid CPU-GPU sync)
             perm = torch.randperm(n_examples, device=device)
