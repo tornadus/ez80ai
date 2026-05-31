@@ -423,7 +423,7 @@ def train(epochs=300, lr=0.002, save_best=False, batch_size=8192, quant_target_e
 
                 outputs = model(X_batch, positions=pos_batch, quant_temp=quant_temp)
                 ce_loss = criterion(outputs, y_batch)
-                quant_loss = model.compute_quantization_loss() * 0.10
+                quant_loss = model.compute_quantization_loss() * 0.25
                 overflow_loss = model.compute_total_overflow_penalty(X_batch) * 0.02
 
                 loss = ce_loss + quant_loss + overflow_loss
