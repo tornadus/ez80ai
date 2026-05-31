@@ -18,6 +18,84 @@ The baseline (released 2-bit `[512,512,256]` arch) is frozen in
 `ez80research/baseline.json` and is the first row of `ez80research/results.tsv`.
 Every experiment is compared against the best `kept` IntAcc so far.
 
+## Findings from prior sessions — READ THIS FIRST
+
+A previous agent ran ~38 experiments + several research probes and reached a
+comprehensively-validated ceiling. Start from the current best; do NOT re-run the
+dead-ends below.
+
+**Current best: IntAcc ≈ 0.6039** (baseline 0.5521, **+5.2pp / +9.4% relative**),
+committed. Kept changes (all in `train.py`/`libqat.py`, compute-neutral):
+- Cosine LR schedule (`CosineAnnealingLR`, T_max=epochs, **eta_min=lr*0.02**).
+- quant-loss weight 0.10 → **0.25** (knee; 0.40 regresses).
+- weight-quantile 0.95 → 0.90 → **0.85** (per-layer scale = Nth-pctile of |W|,
+  changed in ALL 6 spots: libqat `quantize_weights_2bit` + `quantization_friendly_loss`,
+  train `_forward_int`×2 + `get_quantized_params`×2). Biggest single win. Optimum is
+  a flat plateau ~0.83–0.85; lower gives nothing.
+- QT ramp reaches full-quant EARLY: factor 0.8 → **0.4** (QT=1.0 by epoch 0.4·epochs).
+  "Quantize early and long" helps; 0.3 is too early (starves float learning).
+
+**Winning meta-strategy:** STACK two same-direction sub-margin positives in ONE
+experiment — they proved super-additive (both big jumps came from 2-change
+quantization/schedule stacks). The 0.005 margin guards run-noise (train.py
+`--save-best` uses an unseeded 50k eval, so single tweaks read ±0.002–0.005).
+
+**THE CEILING — why almost everything reverts.** Integer accuracy is capped ~0.60
+= architecture/data **float ceiling ~0.63** minus a **structural ~3pp
+train(float)/eval(integer) gap**. Float gains DO NOT transfer to the integer path:
+4-gram encoding (float 0.634, int flat), 3-bit weights (float 0.639, int +0.003),
+per-channel scales (float 0.646, int 0.53–0.57), 4-layer depth (worse on both). The
+gap exists because training uses the float forward (effective weights w_quant·scale
+≈0.05) but the metric is the integer path (unscaled integer weights, ×32 input,
+÷4/layer). The only gap-closer — integer-aware training — FAILS: standard STE blows
+up (gradient ~1/scale ≈20× too large), and gradient-scale-corrected (k=1) STE
+collapses to ~0.107. Bias-only int fine-tune also hurts (0.588).
+
+**DEAD-ENDS — already tested, do NOT repeat:**
+- *Capacity:* width (L3 256→300 neutral), depth (4-layer [384,384,384,256] worse on
+  float AND int), 3-bit weights (+0.003). 2-bit capacity is NOT the bottleneck —
+  extra params just add quantization noise.
+- *Per-channel / learned scales:* per-output-channel scale + per-neuron power-of-2
+  shift (0.53–0.57), LSQ learned scales (0.553). eZ80 can only shift (power-of-2);
+  exact per-channel scales aren't realizable and the gain evaporates.
+- *Activations:* ACTIVATION_SCALE 32→64 (neutral; faithful change = train.py const +
+  `buildchat84.py` ~line 975 bucket-increment constant), ÷4→÷2 (neutral),
+  activation-aware QAT (0.596), output-÷4 removal (0.594).
+- *Schedule:* linear LR (0.5985), 5-epoch warmup (0.6012), LR peak 0.003 (0.591 —
+  model is sensitive to high early LR), QT start 0.3→0.5 (0.597); eta_min already
+  optimal at 0.02.
+- *Optimization:* Adam beta2=0.99 (0.594), grad-clip 1.0 (0.597), **focal loss
+  (0.501** — hard examples are unlearnable conflicting labels), **stochastic rounding
+  (0.571** — noise hurts the in-sample fit), weight-init ×1.5 (0.597), fixed
+  selection-eval subset (0.595), late-ramped quant-loss (0.600).
+- *weight_decay is LOAD-BEARING for quantization* (keeps weights compact for clean
+  rounding): wd=0 → 0.444 catastrophe, wd=2e-4 → 0.575. Keep 1e-4.
+- *Encoding is not the bottleneck* (inputs are distinct; and the eval encoder params
+  num_buckets=128/128 & context_len=8 are FIXED inside evaluate.py — unchangeable).
+- *dual_bias_threshold* 3→5 (0.595; build hardcodes `cp_n(3)` at buildchat84.py:603).
+
+**Key gotchas:**
+- The metric is effectively **IN-SAMPLE** (evaluate.py samples the same
+  training_data.txt). It rewards fitting and PUNISHES regularization/noise (dropout,
+  label smoothing, stochastic rounding, focal all hurt).
+- **Wall-clock ~600s (TRAIN_TIMEOUT) is a second binding constraint:** batch 4096 /
+  slower nets time out → NO_CHECKPOINT. Keep experiments compute-neutral. Raising
+  TRAIN_TIMEOUT for a slow config can end a subagent's turn mid-run, leaving a
+  DANGLING committed edit.
+- IntAcc is measured ONLY by `train.py._forward_int` (the build is a feasibility/size
+  gate; its numerics aren't compared). Any `_forward_int` change MUST be mirrored
+  faithfully in `buildchat84.py` codegen, or it's cheating.
+- Use **research probes** (edit → train.py directly → read IntAcc → revert, WITHOUT
+  the harness) to size build-coupled ideas (encoding, bit-width, ÷-changes,
+  per-channel) before investing in build surgery.
+
+**To beat 0.6039 you almost certainly need a NEW DEGREE OF FREEDOM** (a relaxed hard
+constraint): >2-bit weights on the big layers (needs more RAM), a fundamentally
+different integer-aware-training scheme that actually closes the gap, cleaner/larger
+training data, or build generalization enabling architectures the fixed NEOA-D layout
+forbids. Within the current hard constraints, the search space is exhausted — but per
+"When to stop", keep generating genuinely-novel ideas anyway.
+
 ## Hard constraints — NEVER break these (any violation discards the experiment)
 
 1. **Integer-only inference.** The metric is measured with `use_int=True`. You
