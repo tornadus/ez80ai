@@ -13,3 +13,9 @@ training_data.txt
 # Built binaries
 bin/*.8xp
 bin/*.8xv
+
+# ez80research experiment logs (keep commits source-only)
+ez80research/results.tsv
+ez80research/results.tsv.lock
+ez80research/baseline.json
+ez80research/*.log

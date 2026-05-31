@@ -2129,18 +2129,37 @@ if __name__ == '__main__':
 
     print(f"\nProgram: {len(b.code)} bytes ({len(b.code)/1024:.1f} KB)")
 
-    # Package weight data as AppVars (.8xv)
+    # Report AppVar sizes (no files written yet).
+    total_av = sum(len(d) for d in appvar_blobs.values())
+    for av_name, av_data in appvar_blobs.items():
+        print(f"AppVar {av_name}: {len(av_data):,} bytes")
+    print(f"\nTotal weight data: {total_av:,} bytes ({total_av/1024:.1f} KB)")
+
+    # Hard gate: refuse to ship a model that won't fit the calculator's RAM.
+    # Runs BEFORE writing any .8xv so an over-budget model fails loudly and
+    # cleanly (BudgetError) instead of crashing inside build_8xv on the uint16
+    # AppVar-size limit.
+    import sizes as _sizes
+    _ram = _sizes.total_ram(len(b.code), total_av)
+    print(f"Runtime RAM: ~{_ram/1024:.1f} KB "
+          f"(program {len(b.code)/1024:.1f} + weights {total_av/1024:.1f} "
+          f"+ buffers {_sizes.RUNTIME_BUFFER_BYTES/1024:.1f}); "
+          f"budget {_sizes.RAM_BUDGET_BYTES/1024:.0f} KB")
+    _sizes.validate_or_raise({
+        'program': len(b.code),
+        'appvars': {n: len(d) for n, d in appvar_blobs.items()},
+        'total_weight': total_av,
+    })
+
+    # Within budget: write the AppVar files.
     output_dir = os.path.dirname(args.output) or '.'
-    total_av = 0
     for av_name, av_data in appvar_blobs.items():
         xv_data = build_8xv(av_data, av_name)
         av_path = os.path.join(output_dir, f'{av_name}.8xv')
         with open(av_path, 'wb') as f:
             f.write(xv_data)
-        total_av += len(av_data)
-        print(f"AppVar {av_name}: {len(av_data):,} bytes -> {av_path}")
+        print(f"  wrote {av_path}")
 
-    print(f"\nTotal weight data: {total_av:,} bytes ({total_av/1024:.1f} KB)")
     print(f"Program name: {prog_name.upper()[:8]}")
     print(f"Saved to {args.output}")
     print(f"\nTransfer ALL files to calculator:")
