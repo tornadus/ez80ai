@@ -52,19 +52,20 @@ PY
 
 Every later experiment must beat `baseline.json`'s IntAcc.
 
-## Run the loop (Claude Code `/goal`)
+## Run the loop (Claude Code)
 
-Give Claude Code a standing goal such as:
+`program.md` IS the operating manual — it contains the full loop, the
+subagent-per-iteration pattern, and the stop policy. To launch a fresh instance,
+just point it there:
 
-> Run the ez80research loop. Each iteration: read `ez80research/program.md`,
-> `train.py`, `git log --oneline -5`, and the last ~20 rows of
-> `ez80research/results.tsv`; form ONE hypothesis; edit production file(s); run
-> `bash ez80research/run_experiment.sh "<label>"`; read the VERDICT; continue.
-> The script handles keep/revert and logging — do not ask for confirmation.
-> Stop after 100 logged rows or 8 hours, or immediately if `git status` shows
-> any grader file modified.
+> Read `ez80research/program.md` and run the loop it describes. Begin.
 
-`results.tsv` + git history are the agent's durable memory across context resets.
+The instance acts as the strategist: it forms one hypothesis at a time and runs
+each experiment in a **fresh subagent** (so its own context stays clean), then
+reads the returned `VERDICT` and continues. It runs **indefinitely** and only
+stops on an OS/hardware failure that prevents progress — a failed experiment is
+a normal outcome, not a stop condition. `results.tsv` + git history are its
+durable memory across context resets.
 
 ## Stop / reset
 
