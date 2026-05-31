@@ -390,6 +390,7 @@ def train(epochs=300, lr=0.002, save_best=False, batch_size=8192, quant_target_e
 
     model = model.to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=1e-4)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs, eta_min=lr*0.1)
     criterion = nn.CrossEntropyLoss()
 
     interrupted = False
@@ -463,6 +464,8 @@ def train(epochs=300, lr=0.002, save_best=False, batch_size=8192, quant_target_e
             else:
                 print(f"  Epoch {current_epoch}: CE={avg_loss:.4f} "
                       f"Acc={avg_acc:.1%} QT={quant_temp:.2f} [{elapsed:.1f}s]")
+
+            scheduler.step()
 
         except KeyboardInterrupt:
             print("\nInterrupted!")
