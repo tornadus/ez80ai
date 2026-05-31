@@ -43,7 +43,7 @@ def quantize_weights_2bit(w: torch.Tensor, hard: bool = True, temperature: float
     if temperature <= 0:
         return w
 
-    scale = torch.quantile(w.abs().flatten(), 0.95).clamp(min=1e-6)
+    scale = torch.quantile(w.abs().flatten(), 0.90).clamp(min=1e-6)
     w_scaled = w / scale
     w_quant = torch.clamp(torch.round(w_scaled), -2, 1) * scale
 
@@ -62,7 +62,7 @@ def quantize_weights_2bit(w: torch.Tensor, hard: bool = True, temperature: float
 
 def quantization_friendly_loss(w: torch.Tensor) -> torch.Tensor:
     """Loss that encourages weights to be close to quantization grid {-2,-1,0,+1}."""
-    scale = torch.quantile(w.abs().flatten(), 0.95).clamp(min=1e-6)
+    scale = torch.quantile(w.abs().flatten(), 0.90).clamp(min=1e-6)
     w_scaled = w / scale
     w_rounded = torch.clamp(torch.round(w_scaled), -2, 1)
     distance = (w_scaled - w_rounded).abs()

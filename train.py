@@ -163,7 +163,7 @@ class NeochatModel(nn.Module):
 
         for layer in self.layers:
             w = layer.weight
-            scale = torch.quantile(w.abs().flatten(), 0.95).clamp(min=1e-6)
+            scale = torch.quantile(w.abs().flatten(), 0.90).clamp(min=1e-6)
             w_quant = torch.clamp(torch.round(w / scale), -2, 1)
             b_quant = torch.round(layer.bias * ACTIVATION_SCALE)
 
@@ -174,7 +174,7 @@ class NeochatModel(nn.Module):
 
         # Output layer (no built-in bias)
         w = self.output_layer.weight
-        scale = torch.quantile(w.abs().flatten(), 0.95).clamp(min=1e-6)
+        scale = torch.quantile(w.abs().flatten(), 0.90).clamp(min=1e-6)
         w_quant = torch.clamp(torch.round(w / scale), -2, 1)
         logits = x @ w_quant.T
         logits = ((logits + 8388608) % 16777216) - 8388608
@@ -230,7 +230,7 @@ class NeochatModel(nn.Module):
             name = f'fc{i+1}'
             with torch.no_grad():
                 w = layer.weight
-                w_scale = torch.quantile(w.abs().flatten(), 0.95).clamp(min=1e-6)
+                w_scale = torch.quantile(w.abs().flatten(), 0.90).clamp(min=1e-6)
                 w_quant = torch.clamp(torch.round(w / w_scale), -2, 1).cpu().numpy().astype(np.int8)
                 b_quant = torch.round(layer.bias * ACTIVATION_SCALE).cpu().numpy().astype(np.int16)
                 params[f'{name}_weight'] = w_quant
@@ -239,7 +239,7 @@ class NeochatModel(nn.Module):
         # Output layer
         with torch.no_grad():
             w = self.output_layer.weight
-            w_scale = torch.quantile(w.abs().flatten(), 0.95).clamp(min=1e-6)
+            w_scale = torch.quantile(w.abs().flatten(), 0.90).clamp(min=1e-6)
             w_quant = torch.clamp(torch.round(w / w_scale), -2, 1).cpu().numpy().astype(np.int8)
             params['fc4_weight'] = w_quant
             params['fc4_bias'] = torch.round(self.bias_rest * ACTIVATION_SCALE).cpu().numpy().astype(np.int16)
