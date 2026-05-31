@@ -163,7 +163,7 @@ class NeochatModel(nn.Module):
 
         for layer in self.layers:
             w = layer.weight
-            scale = torch.quantile(w.abs().flatten(), 0.90).clamp(min=1e-6)
+            scale = torch.quantile(w.abs().flatten(), 0.85).clamp(min=1e-6)
             w_quant = torch.clamp(torch.round(w / scale), -2, 1)
             b_quant = torch.round(layer.bias * ACTIVATION_SCALE)
 
@@ -174,7 +174,7 @@ class NeochatModel(nn.Module):
 
         # Output layer (no built-in bias)
         w = self.output_layer.weight
-        scale = torch.quantile(w.abs().flatten(), 0.90).clamp(min=1e-6)
+        scale = torch.quantile(w.abs().flatten(), 0.85).clamp(min=1e-6)
         w_quant = torch.clamp(torch.round(w / scale), -2, 1)
         logits = x @ w_quant.T
         logits = ((logits + 8388608) % 16777216) - 8388608
@@ -230,7 +230,7 @@ class NeochatModel(nn.Module):
             name = f'fc{i+1}'
             with torch.no_grad():
                 w = layer.weight
-                w_scale = torch.quantile(w.abs().flatten(), 0.90).clamp(min=1e-6)
+                w_scale = torch.quantile(w.abs().flatten(), 0.85).clamp(min=1e-6)
                 w_quant = torch.clamp(torch.round(w / w_scale), -2, 1).cpu().numpy().astype(np.int8)
                 b_quant = torch.round(layer.bias * ACTIVATION_SCALE).cpu().numpy().astype(np.int16)
                 params[f'{name}_weight'] = w_quant
@@ -239,7 +239,7 @@ class NeochatModel(nn.Module):
         # Output layer
         with torch.no_grad():
             w = self.output_layer.weight
-            w_scale = torch.quantile(w.abs().flatten(), 0.90).clamp(min=1e-6)
+            w_scale = torch.quantile(w.abs().flatten(), 0.85).clamp(min=1e-6)
             w_quant = torch.clamp(torch.round(w / w_scale), -2, 1).cpu().numpy().astype(np.int8)
             params['fc4_weight'] = w_quant
             params['fc4_bias'] = torch.round(self.bias_rest * ACTIVATION_SCALE).cpu().numpy().astype(np.int16)
@@ -403,7 +403,7 @@ def train(epochs=300, lr=0.002, save_best=False, batch_size=8192, quant_target_e
 
             # QT ramp based on global epoch count so resume doesn't reset
             global_epoch = total_epochs + epoch
-            quant_temp = 0.3 + 0.7 * min(1.0, global_epoch / (quant_target_epoch * 0.8))
+            quant_temp = 0.3 + 0.7 * min(1.0, global_epoch / (quant_target_epoch * 0.5))
 
             # Shuffle indices each epoch (on GPU to avoid CPU-GPU sync)
             perm = torch.randperm(n_examples, device=device)
