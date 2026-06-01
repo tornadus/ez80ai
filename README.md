@@ -5,7 +5,7 @@ A language model on a graphing calculator? More likely than you think!
 ### Disclaimer
 This project was built on the shoulders of giants. Two other projects served as the foundation for this project:
 - [HarryR/z80ai](https://github.com/HarryR/z80ai): The core of this hard fork, and the source of the black magic that makes this possible. Much of the code here is the same, just adapted for the eZ80 and TI-OS.
-- [marspa73/atarijam](https://github.com/marspa73/atarijam) JAM (Just Atari Model), a similar project targeting late-70s Atari Microcomputers. eZ80-ai's attention mechanism comes from here.
+- [marspa73/atarijam](https://github.com/marspa73/atarijam) JAM (Just Atari Model), a similar project targeting late-70s Atari Microcomputers. eZ80-ai's context-attention mechanism was originally inspired by JAM (it has since been removed to keep on-device output faithful to the trained model, but JAM remains a foundational inspiration).
 
 If you like this project, please show some appreciation for those two as well. They deserve it.
 

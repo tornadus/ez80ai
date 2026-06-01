@@ -5,11 +5,13 @@ Build NEOCHAT -- eZ80 native 24-bit accumulator neural net for Ti-84 Plus CE (.8
 Features:
   - 43-character charset (digits, punctuation)
   - Dual bias sets for output layer (fc4_bias / fc4_bias_start)
-  - D_J Context Attention (from JAM XL): 32-slot key/value memory
-  - Confidence gating: "JUST ASK" on low first-char margin
-  - EOS suppression when margin is low and generation is short
-  - Repeat detection: 3 consecutive identical chars -> fallback
-  - Progressive EOL bias after position 17
+  - Faithful mirror of the Python integer path (train.py: _forward_int /
+    generate_response): pure argmax + dual bias, stop at EOS or max_len=50.
+    NO device-only heuristics -- on-device output must match the Python sim
+    character-for-character. (The build's numerics are NOT auto-verified against
+    the sim, so any divergence is silent; keep them in lockstep. A prior release
+    shipped device-only attention/heuristics + a 16-bit-counter quirk and produced
+    on-calc gibberish; those were removed and the loop counters made 24-bit.)
 
 Usage:
     python3 buildchat84.py --model model.npz --output NEOCHAT.8xp
@@ -210,8 +212,17 @@ def build_scan_table(b):
     b.db(*table)
 
 
-def build_autoreg(model_path: str = 'model.npz'):
-    """Build the autoregressive inference for Ti-84 Plus CE"""
+def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
+    """Build the autoregressive inference for Ti-84 Plus CE.
+
+    When debug=True, the production inference codegen is left 100% intact and
+    REUSED; the only change is that after the AppVars are loaded the program is
+    routed to a DBG_RUN instrumentation routine (instead of CHAT). DBG_RUN reads
+    one query, runs ONE forward pass (genpos=0, empty/space context) through the
+    exact same LAYER/RELU/ARGMAX subroutines, and dumps 24-bit checksums of each
+    intermediate buffer plus the argmax to the home screen. This lets us
+    binary-search where the on-device math diverges from the Python sim.
+    """
 
     # Load model
     print(f"Loading model from {model_path}...")
@@ -337,10 +348,19 @@ def build_autoreg(model_path: str = 'model.npz'):
         b.call_addr(TI_Mov9ToOP1)
         b.call_addr(TI_ChkFindSym)
         b.jp_c('AV_ERR')              # carry set = not found
-        b.or_a()
-        b.jr_z(f'AV_RAM{i}')
+        # Decide RAM vs archived by WHERE ChkFindSym's data pointer (DE) points,
+        # not by the archive-flag register (A/B), which proved unreliable on real
+        # hardware. RAM is >= 0xD00000; archived vars live in flash (< 0xD00000).
+        # Testing the pointer also means we never Arc_Unarc a var that's already
+        # in RAM, so the calc's archive layout is left exactly as we found it.
+        b.ex_de_hl()                  # HL = data pointer
+        b.ld_mem_label_hl('AVTMP')    # stash all 3 bytes
+        b.ex_de_hl()                  # restore DE = data pointer
+        b.ld_a_mem_label('AVTMP_HI')  # A = high byte of the pointer
+        b.cp_n(0xD0)
+        b.jr_nc(f'AV_RAM{i}')         # high byte >= 0xD0 -> already in RAM, use as-is
 
-        # Archived -- unarchive it, then re-find
+        # Archived (pointer in flash) -- unarchive it, then re-find
         b.ld_hl_label(f'AVNAME{i}')
         b.call_addr(TI_Mov9ToOP1)
         b.call_addr(TI_Arc_Unarc)
@@ -354,7 +374,12 @@ def build_autoreg(model_path: str = 'model.npz'):
         b.label(f'AV_RAM{i}')
         b.inc_de()
         b.inc_de()                    # Skip 2-byte size header
-        b.ld_mem_label_de(f'AVPTR{i}')
+        # Store the AppVar weight-data pointer. ED-53 (LD (nn),DE) can corrupt
+        # adjacent memory on real hardware (libez80 caveat #2), so move the
+        # pointer into HL and use the safe LD (nn),HL (0x22) instead. DE/HL are
+        # not needed afterwards (the loop re-finds each AppVar).
+        b.ex_de_hl()
+        b.ld_mem_label_hl(f'AVPTR{i}')
 
     b.jr('AV_OK')
 
@@ -376,11 +401,11 @@ def build_autoreg(model_path: str = 'model.npz'):
     b.call_addr(TI_ClrScrn)
     b.call_addr(TI_HomeUp)
 
-    # Clear attention state on startup
-    b.call('CTX_CLEAR')
-
-    # Enter chat mode
-    b.jp('CHAT')
+    # Enter chat mode (or the debug dump in --debug builds)
+    if debug:
+        b.jp('DBG_RUN')
+    else:
+        b.jp('CHAT')
 
     # === CHAT MODE ===
     b.label('CHAT')
@@ -400,7 +425,6 @@ def build_autoreg(model_path: str = 'model.npz'):
     b.jr_z('WAIT_KEY')
     b.call_addr(TI_ClrScrn)
     b.call_addr(TI_HomeUp)
-    b.call('CTX_CLEAR')       # Clear attention on screen clear
     b.jr('CHAT_PROMPT')
 
     b.label('CHAT_NOCLS')
@@ -552,14 +576,13 @@ def build_autoreg(model_path: str = 'model.npz'):
     b.jr('RI_LOOP')
 
     b.label('RI_CLEAR')
-    # CLEAR key: reset input, clear screen, clear attention state
+    # CLEAR key: reset input, clear screen
     b.xor_a()
     b.ld_mem_label_a('INPLEN')
     b.ld_a_n(1)
     b.ld_mem_label_a('RI_CLEAR_FLAG')
     b.call_addr(TI_ClrScrn)
     b.call_addr(TI_HomeUp)
-    b.call('CTX_CLEAR')       # Clear attention on CLEAR key
     b.jp('RI_DONE')
 
     b.label('RI_MODE')
@@ -573,25 +596,19 @@ def build_autoreg(model_path: str = 'model.npz'):
     b.ret()
 
     # === GENERATE: Main generation loop ===
+    # Faithful to train.generate_response: pure argmax + dual-bias-by-position,
+    # stop at EOS or after MAX_OUTPUT_LEN (=50) characters. No attention, no
+    # logit boosting, no confidence gating, no repeat detection.
     b.label('GENERATE')
     b.ld_a_n(MAX_OUTPUT_LEN)
-    b.ld_mem_label_a('GENCNT')
+    b.ld_mem_label_a('GENCNT')     # Remaining-character / max-length counter
     b.xor_a()
     b.ld_mem_label_a('GENPOS')     # Generation position counter (0-based)
-    b.ld_mem_label_a('LASTCH')     # Last character for repeat detection
-    b.ld_mem_label_a('REPCNT')     # Repeat count
-
-    # Write to D_J attention before generation
-    b.call('CTX_WRITE')
 
     b.label('GENLOOP')
     # 5 virtual layers: L1 -> RELU1 -> L2A+L2B -> RELU2 -> L3 -> RELU3 -> L4
     b.call('LAYER1')     # 256->512, output to BUF_A
     b.call('RELU1')      # ReLU BUF_A (512 values)
-
-    # D_J Context Attention: mix context after RELU1, before LAYER2A
-    b.call('CTX_ATTEND')
-
     b.call('LAYER2A')    # 512->256, first half to BUF_B[0..255]
     b.call('LAYER2B')    # 512->256, second half to BUF_B[256..511]
     b.call('RELU2')      # ReLU BUF_B (512 values)
@@ -608,129 +625,15 @@ def build_autoreg(model_path: str = 'model.npz'):
     b.call('LAYER4_REST')    # subsequent: use rest bias
     b.label('GEN_L4_DONE')
 
-    # === Progressive EOL bias ===
-    # If GENPOS > 17: add 16 + (GENPOS - 17) * 16 to EOS logit
-    b.ld_a_mem_label('GENPOS')
-    b.cp_n(18)
-    b.jr_c('GEN_NO_EOL_BIAS')
-    # A = GENPOS >= 18
-    b.sub_n(17)           # A = GENPOS - 17 (1, 2, 3, ...)
-    # Multiply by 16: shift left 4
-    b.sla_a()             # SLA A
-    b.sla_a()             # SLA A
-    b.sla_a()             # SLA A
-    b.sla_a()             # SLA A
-    b.add_a_n(16)         # A = 16 + (GENPOS-17)*16
-    # Add to OUTBUF[EOS_IDX * 2] (16-bit, little-endian)
-    b.ld_hl_label('OUTBUF')
-    b.ld_de_nn(eos_idx * 2)
-    b.add_hl_de()
-    # Load current EOS logit
-    b.ld_e_hl()           # low byte
-    b.inc_hl()
-    b.ld_d_hl()           # high byte
-    # Add A (unsigned) to DE (16-bit): E += A, D += carry
-    b.push_hl()
-    b.ld_c_a()
-    b.ld_b_n(0)
-    b.ex_de_hl()
-    b.add_hl_bc_16()
-    b.ex_de_hl()
-    # Store back
-    b.pop_hl()
-    b.ld_a_d()
-    b.ld_hl_a()           # high byte
-    b.dec_hl()
-    b.ld_a_e()
-    b.ld_hl_a()           # low byte
-    b.label('GEN_NO_EOL_BIAS')
-
-    # === ARGMAX with second-best tracking ===
+    # === ARGMAX -> RESULT (plain argmax over logits) ===
     b.call('ARGMAX')
 
-    # === Confidence gating ===
-    # If GENPOS == 0 and margin < 3: UNSURE
-    b.ld_a_mem_label('GENPOS')
-    b.or_a()
-    b.jr_nz('GEN_CONF_OK')
-    # First char: check margin (best - second)
-    # 16-bit margin: MAXL:MAXH - SECL:SECH
-    b.ld_a_mem_label('MAXL')
-    b.ld_hl_label('SECL')
-    b.sub_hl_ind()                       # A = MAXL - SECL (low byte of difference)
-    b.ld_mem_label_a('MARGIN_L')
-    b.ld_a_mem_label('MAXH')
-    b.ld_hl_label('SECH')
-    b.sbc_a_hl()                         # SBC A, (HL) -- high byte with borrow
-    b.ld_mem_label_a('MARGIN_H')
-    # If high byte != 0, margin is large -> OK
-    b.or_a()
-    b.jr_nz('GEN_CONF_OK')
-    b.ld_a_mem_label('MARGIN_L')
-    b.cp_n(3)
-    b.jr_nc('GEN_CONF_OK')
-    # Margin < 3: unsure
-    b.jp('GEN_UNSURE')
-
-    b.label('GEN_CONF_OK')
-
-    # === EOS check with margin guard ===
+    # === EOS check: stop when argmax == EOS index ===
     b.ld_a_mem_label('RESULT')
     b.cp_n(eos_idx)
-    b.jr_nz('GEN_NOT_EOS')
+    b.jr_z('GEN_STOP')       # argmax == EOS: stop generation
 
-    # EOS is best. If GENPOS < 15 and margin < 5: use second best
-    b.ld_a_mem_label('GENPOS')
-    b.cp_n(15)
-    b.jr_nc('GEN_EOS_ACCEPT')
-    # Check margin
-    b.ld_a_mem_label('MAXL')
-    b.ld_hl_label('SECL')
-    b.sub_hl_ind()
-    b.ld_mem_label_a('MARGIN_L')
-    b.ld_a_mem_label('MAXH')
-    b.ld_hl_label('SECH')
-    b.sbc_a_hl()                         # SBC A, (HL)
-    b.ld_mem_label_a('MARGIN_H')
-    b.or_a()
-    b.jr_nz('GEN_EOS_ACCEPT')    # high byte nonzero = large margin
-    b.ld_a_mem_label('MARGIN_L')
-    b.cp_n(5)
-    b.jr_nc('GEN_EOS_ACCEPT')    # margin >= 5: accept
-    # Suppress EOS: use second best
-    b.ld_a_mem_label('SECI')
-    b.ld_mem_label_a('RESULT')
-    # Check if second best is also EOS (unlikely but safe)
-    b.cp_n(eos_idx)
-    b.jr_z('GEN_EOS_ACCEPT')
-    b.jr('GEN_NOT_EOS')
-
-    b.label('GEN_EOS_ACCEPT')
-    b.ret()     # EOS accepted: return from GENERATE
-
-    b.label('GEN_NOT_EOS')
-
-    # === Repeat detection ===
-    b.ld_a_mem_label('RESULT')
-    b.ld_hl_label('LASTCH')
-    b.cp_hl()
-    b.jr_nz('GEN_NEWCH')
-    # Same character: increment repeat count
-    b.ld_a_mem_label('REPCNT')
-    b.inc_a()
-    b.ld_mem_label_a('REPCNT')
-    b.cp_n(3)
-    b.jr_nc('GEN_FALLBACK')     # 3+ repeats -> fallback
-    b.jr('GEN_PRINT')
-
-    b.label('GEN_NEWCH')
-    b.ld_a_mem_label('RESULT')
-    b.ld_mem_label_a('LASTCH')
-    b.ld_a_n(1)
-    b.ld_mem_label_a('REPCNT')
-
-    b.label('GEN_PRINT')
-    # Print character -- restore IY for TI-OS, set inverse mode
+    # === Print character -- restore IY for TI-OS, set inverse mode
     b.ld_iy_mem_label('SAVED_IY')
     b.ld_hl_nn(0xD00085)     # textFlags
     b.ld_a_hl()
@@ -746,69 +649,13 @@ def build_autoreg(model_path: str = 'model.npz'):
     b.inc_a()
     b.ld_mem_label_a('GENPOS')
 
-    # Loop
+    # MAX-LENGTH stop: loop while GENCNT (remaining of MAX_OUTPUT_LEN) nonzero
     b.ld_a_mem_label('GENCNT')
     b.dec_a()
     b.ld_mem_label_a('GENCNT')
     b.jp_nz('GENLOOP')
-    b.ret()
 
-    # === GEN_UNSURE: Model unsure about first char ===
-    b.label('GEN_UNSURE')
-    b.ld_iy_mem_label('SAVED_IY')
-    b.ld_hl_nn(0xD00085)
-    b.ld_a_hl()
-    b.or_n(0x08)              # OR 0x08
-    b.ld_hl_a()
-    b.ld_hl_label('UNSURE_MSG')
-    b.label('GU_LOOP')
-    b.ld_a_hl()
-    b.or_a()
-    b.jr_z('GU_DONE')
-    b.push_hl()
-    b.call_addr(TI_PutC)
-    b.pop_hl()
-    b.inc_hl()
-    b.jr('GU_LOOP')
-    b.label('GU_DONE')
-    b.ret()
-
-    # === GEN_FALLBACK: Repeat detected, print fallback message ===
-    b.label('GEN_FALLBACK')
-    b.ld_iy_mem_label('SAVED_IY')
-    b.ld_hl_nn(0xD00085)
-    b.ld_a_hl()
-    b.or_n(0x08)              # OR 0x08
-    b.ld_hl_a()
-    # Pick one of 3 fallback messages based on GENPOS as pseudo-random seed
-    b.ld_a_mem_label('GENPOS')
-    b.and_n(0x03)
-    b.cp_n(3)
-    b.jr_c('GF_PICK')
-    b.xor_a()
-    b.label('GF_PICK')
-    # A = 0, 1, or 2: select message
-    b.or_a()
-    b.jr_nz('GF_NOT0')
-    b.ld_hl_label('FB_MSG0')
-    b.jr('GF_PRINT')
-    b.label('GF_NOT0')
-    b.cp_n(1)
-    b.jr_nz('GF_NOT1')
-    b.ld_hl_label('FB_MSG1')
-    b.jr('GF_PRINT')
-    b.label('GF_NOT1')
-    b.ld_hl_label('FB_MSG2')
-    b.label('GF_PRINT')
-    b.ld_a_hl()
-    b.or_a()
-    b.jr_z('GF_DONE')
-    b.push_hl()
-    b.call_addr(TI_PutC)
-    b.pop_hl()
-    b.inc_hl()
-    b.jr('GF_PRINT')
-    b.label('GF_DONE')
+    b.label('GEN_STOP')
     b.ret()
 
     # === PRINTCH: Print character from RESULT via TI-OS ===
@@ -991,469 +838,6 @@ def build_autoreg(model_path: str = 'model.npz'):
 
     b.jp('ENCODE_CTX')
 
-    # === D_J Context Attention Routines ===
-
-    # --- CTX_CLEAR: Zero all attention state ---
-    b.label('CTX_CLEAR')
-    b.ld_hl_label('CTX_KEY')
-    b.push_hl()
-    b.pop_de()
-    b.inc_de()
-    b.xor_a()
-    b.ld_hl_a()
-    # Total bytes: 128 (key) + 128 (val) + 32 (age) + 4 (query) + 1 + 1 + 1 = 295
-    b.ld_bc_nn(294)    # 295 - 1
-    b.ldir()
-    b.ret()
-
-    # --- CTX_ATTEND: After RELU1, before LAYER2A ---
-    # Build 4-dim query from TOKBUF[0:3] via D_J rotation
-    # q[0]=thash[3]-thash[2], q[1]=-thash[2], q[2]=thash[0]-thash[2], q[3]=thash[1]-thash[2]
-    # Then dot-product scan over 32 slots, add best value to BUF_A[0:3]
-    b.label('CTX_ATTEND')
-    # Load TOKBUF[0..3] as 16-bit values but use low byte only for query construction
-    # thash values are in TOKBUF (first 128 buckets, 16-bit each)
-    # TOKBUF[i] is at TOKBUF + i*2 (16-bit little-endian)
-    # We use the low byte of TOKBUF[0..3] as the hash values
-
-    # Load thash[2] low byte into B (used by all query components)
-    b.ld_hl_label('TOKBUF')
-    b.ld_de_nn(4)           # offset to TOKBUF[2]
-    b.add_hl_de()
-    b.ld_a_hl()             # A = thash[2] low byte
-    b.ld_b_a()              # B = thash[2] (saved for reuse)
-
-    # q[0] = thash[3] - thash[2]
-    b.ld_hl_label('TOKBUF')
-    b.ld_de_nn(6)           # offset to TOKBUF[3]
-    b.add_hl_de()
-    b.ld_a_hl()             # A = thash[3]
-    b.sub_b()               # SUB B  (A = thash[3] - thash[2])
-    b.ld_hl_label('CTX_QUERY')
-    b.ld_hl_a()             # q[0]
-
-    # q[1] = -thash[2]
-    b.xor_a()
-    b.sub_b()               # SUB B  (A = 0 - thash[2])
-    b.ld_hl_label('CTX_QUERY')
-    b.inc_hl()
-    b.ld_hl_a()             # q[1]
-
-    # q[2] = thash[0] - thash[2]
-    b.ld_hl_label('TOKBUF')
-    b.ld_a_hl()             # A = thash[0]
-    b.sub_b()               # SUB B
-    b.ld_hl_label('CTX_QUERY')
-    b.ld_de_nn(2)
-    b.add_hl_de()
-    b.ld_hl_a()             # q[2]
-
-    # q[3] = thash[1] - thash[2]
-    b.ld_hl_label('TOKBUF')
-    b.ld_de_nn(2)           # offset to TOKBUF[1]
-    b.add_hl_de()
-    b.ld_a_hl()             # A = thash[1]
-    b.sub_b()               # SUB B
-    b.ld_hl_label('CTX_QUERY')
-    b.ld_de_nn(3)
-    b.add_hl_de()
-    b.ld_hl_a()             # q[3]
-
-    # --- Dot product scan over 32 slots ---
-    b.xor_a()
-    b.ld_mem_label_a('CTX_BEST')    # best slot = 0
-    b.ld_a_n(0x80)                   # worst possible score (-128)
-    b.ld_mem_label_a('CTX_SCORE')
-
-    b.xor_a()
-    b.ld_mem_label_a('CA_SLOT')     # slot counter
-
-    b.label('CA_SLOT_LOOP')
-    # Compute dot product for current slot
-    # key base = CTX_KEY + slot*4
-    b.ld_a_mem_label('CA_SLOT')
-    b.sla_a()             # SLA A (*2)
-    b.sla_a()             # SLA A (*4)
-    b.ld_hl_label('CTX_KEY')
-    b.ld_de_nn(0)
-    b.ld_e_a()
-    b.add_hl_de()         # HL = CTX_KEY + slot*4
-    b.ld_mem_label_hl('CA_KPTR')    # save key pointer
-
-    # acc = 0 (dot product accumulator, 8-bit signed)
-    b.xor_a()
-    b.ld_mem_label_a('CA_ACC')
-
-    # For each of 4 dimensions: acc += query[i] * key[i]
-    # Using signed 8-bit multiply approximation (repeated addition)
-    b.ld_a_n(0)
-    b.ld_mem_label_a('CA_DIM')
-
-    b.label('CA_DIM_LOOP')
-    # Load query[dim]
-    b.ld_hl_label('CTX_QUERY')
-    b.ld_a_mem_label('CA_DIM')
-    b.ld_de_nn(0)
-    b.ld_e_a()
-    b.add_hl_de()
-    b.ld_a_hl()           # A = query[dim] (signed)
-    b.ld_mem_label_a('CA_Q')
-
-    # Load key[dim]
-    b.ld_hl_mem_label('CA_KPTR')
-    b.ld_a_mem_label('CA_DIM')
-    b.ld_de_nn(0)
-    b.ld_e_a()
-    b.add_hl_de()
-    b.ld_a_hl()           # A = key[dim] (signed, [-3..3])
-    b.ld_mem_label_a('CA_K')
-
-    # Signed 8-bit multiply: product = query * key
-    # Both values are small, so we use repeated addition
-    b.call('DOT_MUL')
-
-    b.ld_a_mem_label('CA_DIM')
-    b.inc_a()
-    b.ld_mem_label_a('CA_DIM')
-    b.cp_n(4)
-    b.jr_c('CA_DIM_LOOP')
-
-    # Compare accumulated score with best (signed 8-bit)
-    b.ld_a_mem_label('CA_ACC')
-    b.ld_hl_label('CTX_SCORE')
-    # Signed compare: A > (HL)?
-    b.ld_b_a()            # save score in B
-    b.sub_hl_ind()        # A = score - best_score (may overflow)
-    # Handle signed overflow
-    b.jp_m('CA_NOT_BEST')
-    # score >= best_score (or overflow handled): update
-    b.ld_a_b()
-    b.ld_mem_label_a('CTX_SCORE')
-    b.ld_a_mem_label('CA_SLOT')
-    b.ld_mem_label_a('CTX_BEST')
-
-    b.label('CA_NOT_BEST')
-    b.ld_a_mem_label('CA_SLOT')
-    b.inc_a()
-    b.ld_mem_label_a('CA_SLOT')
-    b.cp_n(32)            # 32 slots
-    b.jp_nz('CA_SLOT_LOOP')
-
-    # --- Add best slot's value to BUF_A[0:3] if score > 0 ---
-    b.ld_a_mem_label('CTX_SCORE')
-    b.or_a()
-    b.ret_z()             # score == 0: no match
-    b.jp_m('CA_RET')      # score < 0: no match
-
-    # value base = CTX_VAL + best*4
-    b.ld_a_mem_label('CTX_BEST')
-    b.sla_a()             # SLA A (*2)
-    b.sla_a()             # SLA A (*4)
-    b.ld_hl_label('CTX_VAL')
-    b.ld_de_nn(0)
-    b.ld_e_a()
-    b.add_hl_de()         # HL = CTX_VAL + best*4
-    b.ld_mem_label_hl('CA_VPTR')
-
-    # Add 4 values to BUF_A[0:3] (8-bit values, sign-extended to 16-bit, add to 16-bit BUF_A)
-    b.ld_a_n(0)
-    b.ld_mem_label_a('CA_DIM')
-
-    b.label('CA_ADD_LOOP')
-    # Load 8-bit value from CTX_VAL
-    b.ld_hl_mem_label('CA_VPTR')
-    b.ld_a_mem_label('CA_DIM')
-    b.ld_de_nn(0)
-    b.ld_e_a()
-    b.add_hl_de()
-    b.ld_a_hl()           # A = value (8-bit, treated as unsigned 0-3 from quant)
-    # Sign extend to 16-bit (these are unsigned 0-3 values, so just zero-extend)
-    b.ld_e_a()
-    b.ld_d_n(0)           # DE = 16-bit value
-
-    # BUF_A[dim] is 16-bit at BUF_A + dim*2
-    b.ld_hl_label('BUF_A')
-    b.ld_a_mem_label('CA_DIM')
-    b.sla_a()             # SLA A (*2 for word offset)
-    b.ld_bc_nn(0)
-    b.ld_c_a()
-    b.add_hl_bc()         # HL = BUF_A + dim*2
-
-    # Load current BUF_A value (16-bit)
-    b.push_hl()           # save pointer
-    b.ld_c_hl()           # LD C, (HL) -- low byte
-    b.inc_hl()
-    b.ld_b_hl()           # B = high byte
-
-    # Add DE to BC with saturation at 0x7FFF
-    b.push_hl()
-    b.ld_hl_nn_16(0)
-    b.ld_h_b()            # LD H, B
-    b.ld_l_c()            # LD L, C
-    b.add_hl_de_16()      # HL = old + value (16-bit)
-    # Check for overflow (positive saturation)
-    b.bit_7_d()           # Was the addend negative? No (always 0-3), skip neg check
-    # Check if result went negative (overflow)
-    b.ld_a_h()
-    b.and_n(0x80)
-    b.jr_z('CA_NO_SAT')
-    # Saturated: check if both operands were positive
-    b.ld_a_b()            # old high byte
-    b.and_n(0x80)
-    b.jr_nz('CA_NO_SAT')  # old was negative, no saturation needed
-    b.ld_hl_nn_16(0x7FFF)
-    b.label('CA_NO_SAT')
-    b.ld_b_h()            # LD B, H
-    b.ld_c_l()            # LD C, L
-    b.pop_hl()            # HL = BUF_A + dim*2 + 1
-    b.ld_a_b()
-    b.ld_hl_a()           # store high byte
-    b.pop_hl()            # HL = BUF_A + dim*2
-    b.ld_a_c()
-    b.ld_hl_a()           # store low byte
-
-    b.ld_a_mem_label('CA_DIM')
-    b.inc_a()
-    b.ld_mem_label_a('CA_DIM')
-    b.cp_n(4)
-    b.jr_c('CA_ADD_LOOP')
-
-    b.label('CA_RET')
-    b.ret()
-
-    # --- DOT_MUL: CA_ACC += CA_Q * CA_K (signed 8-bit multiply) ---
-    b.label('DOT_MUL')
-    b.ld_a_mem_label('CA_Q')
-    b.or_a()
-    b.ret_z()             # query == 0: skip
-    b.ld_a_mem_label('CA_K')
-    b.or_a()
-    b.ret_z()             # key == 0: skip
-
-    # Determine sign of product
-    b.ld_a_mem_label('CA_Q')
-    b.ld_hl_label('CA_K')
-    b.xor_hl()            # XOR (HL)
-    b.and_n(0x80)
-    b.ld_mem_label_a('CA_SIGN')   # bit 7 = sign of product
-
-    # abs(query)
-    b.ld_a_mem_label('CA_Q')
-    b.or_a()
-    b.jp_m('DM_NEGQ')
-    b.jr('DM_ABSQ_OK')
-    b.label('DM_NEGQ')
-    b.cpl()               # CPL (complement A)
-    b.inc_a()
-    b.label('DM_ABSQ_OK')
-    b.ld_mem_label_a('CA_ABSQ')
-
-    # abs(key)
-    b.ld_a_mem_label('CA_K')
-    b.or_a()
-    b.jp_m('DM_NEGK')
-    b.jr('DM_ABSK_OK')
-    b.label('DM_NEGK')
-    b.cpl()               # CPL
-    b.inc_a()
-    b.label('DM_ABSK_OK')
-
-    # Multiply by repeated addition: product = abs(key) * abs(query)
-    # abs(key) is small (0-3), use as loop count
-    b.ld_b_a()            # B = abs(key) (loop count)
-    b.ld_hl_label('CA_ABSQ')
-    b.xor_a()             # A = 0 (accumulator)
-    b.label('DM_MUL_LP')
-    b.add_a_hl()          # ADD A, (HL) -- repeated addition
-    b.djnz('DM_MUL_LP')
-
-    # A = |product|. Apply sign.
-    b.ld_c_a()            # save |product|
-    b.ld_a_mem_label('CA_SIGN')
-    b.or_a()
-    b.jr_z('DM_POS')
-    # Negative product: CA_ACC -= |product|
-    b.ld_a_mem_label('CA_ACC')
-    b.sub_c()             # SUB C
-    b.ld_mem_label_a('CA_ACC')
-    b.ret()
-    b.label('DM_POS')
-    # Positive product: CA_ACC += |product|
-    b.ld_a_mem_label('CA_ACC')
-    b.add_a_c()           # ADD A, C
-    b.ld_mem_label_a('CA_ACC')
-    b.ret()
-
-    # --- CTX_WRITE: Store current context in oldest slot ---
-    b.label('CTX_WRITE')
-    # Find oldest slot (highest age)
-    b.xor_a()
-    b.ld_mem_label_a('CTX_WSLOT')
-    b.ld_hl_label('CTX_AGE')
-    b.ld_a_hl()
-    b.ld_mem_label_a('CTX_SCORE')  # reuse as max_age
-
-    b.ld_a_n(1)
-    b.ld_mem_label_a('CW_IDX')
-
-    b.label('CW_FIND')
-    b.ld_hl_label('CTX_AGE')
-    b.ld_a_mem_label('CW_IDX')
-    b.ld_de_nn(0)
-    b.ld_e_a()
-    b.add_hl_de()
-    b.ld_a_hl()                    # A = age[idx]
-    b.ld_hl_label('CTX_SCORE')
-    b.cp_hl()                      # compare with max age
-    b.jr_c('CW_NOT_OLD')           # if age < max, skip
-    b.ld_mem_label_a('CTX_SCORE')
-    b.ld_a_mem_label('CW_IDX')
-    b.ld_mem_label_a('CTX_WSLOT')
-    b.label('CW_NOT_OLD')
-    b.ld_a_mem_label('CW_IDX')
-    b.inc_a()
-    b.ld_mem_label_a('CW_IDX')
-    b.cp_n(32)
-    b.jr_c('CW_FIND')
-
-    # Write key: query values clamped to [-3, 3]
-    b.ld_a_mem_label('CTX_WSLOT')
-    b.sla_a()             # SLA A (*2)
-    b.sla_a()             # SLA A (*4)
-    b.ld_hl_label('CTX_KEY')
-    b.ld_de_nn(0)
-    b.ld_e_a()
-    b.add_hl_de()         # HL = CTX_KEY + slot*4
-    b.ld_mem_label_hl('CW_KPTR')
-
-    # Write 4 query values clamped to [-3, 3]
-    b.ld_a_n(0)
-    b.ld_mem_label_a('CW_DIM')
-
-    b.label('CW_KEY_LOOP')
-    b.ld_hl_label('CTX_QUERY')
-    b.ld_a_mem_label('CW_DIM')
-    b.ld_de_nn(0)
-    b.ld_e_a()
-    b.add_hl_de()
-    b.ld_a_hl()           # A = query[dim] (signed)
-    # Clamp to [-3, 3]
-    b.call('CLAMP_S3')
-    # Store to key
-    b.push_af()
-    b.ld_hl_mem_label('CW_KPTR')
-    b.ld_a_mem_label('CW_DIM')
-    b.ld_de_nn(0)
-    b.ld_e_a()
-    b.add_hl_de()
-    b.pop_af()
-    b.ld_hl_a()
-
-    b.ld_a_mem_label('CW_DIM')
-    b.inc_a()
-    b.ld_mem_label_a('CW_DIM')
-    b.cp_n(4)
-    b.jr_c('CW_KEY_LOOP')
-
-    # Write value: quantized BUF_A[0:3] >> 6 (giving 0-3 range)
-    b.ld_a_mem_label('CTX_WSLOT')
-    b.sla_a()             # SLA A (*2)
-    b.sla_a()             # SLA A (*4)
-    b.ld_hl_label('CTX_VAL')
-    b.ld_de_nn(0)
-    b.ld_e_a()
-    b.add_hl_de()         # HL = CTX_VAL + slot*4
-    b.ld_mem_label_hl('CW_VPTR')
-
-    b.ld_a_n(0)
-    b.ld_mem_label_a('CW_DIM')
-
-    b.label('CW_VAL_LOOP')
-    # Load BUF_A[dim] high byte (16-bit value, take high byte >> 6 for 0-3 range)
-    b.ld_hl_label('BUF_A')
-    b.ld_a_mem_label('CW_DIM')
-    b.sla_a()             # SLA A (*2 for word)
-    b.inc_a()             # +1 for high byte
-    b.ld_de_nn(0)
-    b.ld_e_a()
-    b.add_hl_de()
-    b.ld_a_hl()           # A = high byte of BUF_A[dim]
-    # >> 6: shift right 6 times to get 0-3
-    b.rrca()
-    b.rrca()
-    b.rrca()
-    b.rrca()
-    b.rrca()
-    b.rrca()
-    b.and_n(0x03)         # mask to 2 bits
-
-    # Store to value slot
-    b.push_af()
-    b.ld_hl_mem_label('CW_VPTR')
-    b.ld_a_mem_label('CW_DIM')
-    b.ld_de_nn(0)
-    b.ld_e_a()
-    b.add_hl_de()
-    b.pop_af()
-    b.ld_hl_a()
-
-    b.ld_a_mem_label('CW_DIM')
-    b.inc_a()
-    b.ld_mem_label_a('CW_DIM')
-    b.cp_n(4)
-    b.jr_c('CW_VAL_LOOP')
-
-    # Reset age of written slot
-    b.ld_hl_label('CTX_AGE')
-    b.ld_a_mem_label('CTX_WSLOT')
-    b.ld_de_nn(0)
-    b.ld_e_a()
-    b.add_hl_de()
-    b.xor_a()
-    b.ld_hl_a()
-
-    # Increment all other ages (saturate at 255)
-    b.xor_a()
-    b.ld_mem_label_a('CW_IDX')
-    b.label('CW_AGE_LOOP')
-    b.ld_a_mem_label('CW_IDX')
-    b.ld_hl_label('CTX_WSLOT')
-    b.cp_hl()
-    b.jr_z('CW_AGE_SKIP')
-    # Load age
-    b.ld_hl_label('CTX_AGE')
-    b.ld_de_nn(0)
-    b.ld_e_a()
-    b.add_hl_de()
-    b.ld_a_hl()
-    b.cp_n(255)
-    b.jr_z('CW_AGE_SKIP')
-    b.inc_a()
-    b.ld_hl_a()
-    b.label('CW_AGE_SKIP')
-    b.ld_a_mem_label('CW_IDX')
-    b.inc_a()
-    b.ld_mem_label_a('CW_IDX')
-    b.cp_n(32)
-    b.jr_c('CW_AGE_LOOP')
-    b.ret()
-
-    # --- CLAMP_S3: Clamp signed A to [-3, 3] ---
-    b.label('CLAMP_S3')
-    b.or_a()
-    b.jp_m('CS3_NEG')
-    # Positive: clamp to 3
-    b.cp_n(4)
-    b.jr_c('CS3_DONE')
-    b.ld_a_n(3)
-    b.jr('CS3_DONE')
-    b.label('CS3_NEG')
-    # Negative: clamp to -3 (0xFD)
-    b.cp_n(0xFD)
-    b.jr_nc('CS3_DONE')   # A >= 0xFD (-3): already in range
-    b.ld_a_n(0xFD)        # clamp to -3
-    b.label('CS3_DONE')
-    b.ret()
 
     # === Layer dispatch stubs ===
     def emit_layer_stub(label, av_idx, w_offset, b_offset, in_buf, out_buf,
@@ -1476,12 +860,12 @@ def build_autoreg(model_path: str = 'model.npz'):
         # Set buffers
         b.ld_ix_label(in_buf)
         b.ld_iy_label(out_buf)
-        # Set dimensions (16-bit)
+        # Set dimensions (24-bit loads + stores: clear full HL, write 3-byte slots)
         b.push_hl()
-        b.ld_hl_nn_16(out_size)
-        b.ld_mem_label_hl_16('NEURCNT')
-        b.ld_hl_nn_16(in_size)
-        b.ld_mem_label_hl_16('INCNT')
+        b.ld_hl_nn(out_size)
+        b.ld_mem_label_hl('NEURCNT')
+        b.ld_hl_nn(in_size)
+        b.ld_mem_label_hl('INCNT')
         b.pop_hl()
         if not fall_through:
             b.jp('LAYER')
@@ -1509,8 +893,12 @@ def build_autoreg(model_path: str = 'model.npz'):
     # === LAYER: Neural network layer computation ===
     # 24-bit native accumulator
     b.label('LAYER')
-    b.ld_mem_label_hl('SAVW')
-    b.ld_mem_label_de('SAVB')
+    b.ld_mem_label_hl('SAVW')         # weight pointer -> SAVW (safe LD (nn),HL)
+    # Bias pointer is in DE. ED-53 (LD (nn),DE) can corrupt adjacent memory on
+    # real hardware (libez80 caveat #2); SAVW is already stored, so HL is free --
+    # move the bias pointer into HL and store via the safe LD (nn),HL (0x22).
+    b.ex_de_hl()
+    b.ld_mem_label_hl('SAVB')
 
     b.label('LNEUR')
     b.ld_hl_nn(0)
@@ -1521,8 +909,8 @@ def build_autoreg(model_path: str = 'model.npz'):
     b.ld_de_nn(0)
     b.ld_hl_mem_label('SAVW')
     b.push_hl()
-    b.ld_hl_mem_label_16('INCNT')
-    b.ld_mem_label_hl_16('WTCNT')
+    b.ld_hl_mem_label('INCNT')
+    b.ld_mem_label_hl('WTCNT')
     b.pop_hl()
     b.ld_c_n(0)
 
@@ -1548,12 +936,12 @@ def build_autoreg(model_path: str = 'model.npz'):
     b.add_a_n(4)
     b.ld_c_a()
     b.push_hl()
-    b.ld_hl_mem_label_16('WTCNT')
-    b.dec_hl_16()
-    b.dec_hl_16()
-    b.dec_hl_16()
-    b.dec_hl_16()
-    b.ld_mem_label_hl_16('WTCNT')
+    b.ld_hl_mem_label('WTCNT')
+    b.dec_hl()
+    b.dec_hl()
+    b.dec_hl()
+    b.dec_hl()
+    b.ld_mem_label_hl('WTCNT')
     b.ld_a_h()
     b.or_l()
     b.pop_hl()
@@ -1579,9 +967,9 @@ def build_autoreg(model_path: str = 'model.npz'):
     b.call('MULADD')
     b.inc_c()
     b.push_hl()
-    b.ld_hl_mem_label_16('WTCNT')
-    b.dec_hl_16()
-    b.ld_mem_label_hl_16('WTCNT')
+    b.ld_hl_mem_label('WTCNT')
+    b.dec_hl()
+    b.ld_mem_label_hl('WTCNT')
     b.ld_a_h()
     b.or_l()
     b.pop_hl()
@@ -1634,9 +1022,9 @@ def build_autoreg(model_path: str = 'model.npz'):
 
     # Outer loop: decrement neuron counter
     b.push_hl()
-    b.ld_hl_mem_label_16('NEURCNT')
-    b.dec_hl_16()
-    b.ld_mem_label_hl_16('NEURCNT')
+    b.ld_hl_mem_label('NEURCNT')
+    b.dec_hl()
+    b.ld_mem_label_hl('NEURCNT')
     b.ld_a_h()
     b.or_l()
     b.pop_hl()
@@ -1966,6 +1354,283 @@ def build_autoreg(model_path: str = 'model.npz'):
     b.label('TOK_DONE')
     b.ret()
 
+    # ================================================================
+    # DEBUG instrumentation (only emitted when debug=True). Reuses the
+    # production TOKENIZE / CLEAR_CTX / LAYER* / RELU* / ARGMAX routines
+    # verbatim, capturing a 24-bit byte-checksum of each intermediate
+    # buffer and dumping them to the home screen as 6 hex digits.
+    #
+    # CHECKSUM DEFINITION: sum every raw byte of the buffer into a 24-bit
+    # accumulator (wrap mod 2^24), over the buffer's on-device byte layout.
+    # All activation/logit/token buffers store each value as a little-endian
+    # 16-bit (two's-complement) word, so we just sum count*2 raw bytes.
+    # ================================================================
+    if debug:
+        # Byte lengths of each buffer on the device (value count * 2 bytes/LE16).
+        TOKBUF_BYTES = input_size * 2        # 256 buckets  -> 512 bytes
+        L1_BYTES     = 512 * 2               # BUF_A (RELU1) -> 1024 bytes
+        L2_BYTES     = 512 * 2               # BUF_B+BUF_B_MID contiguous -> 1024 bytes
+        L3_BYTES     = 256 * 2               # BUF_A (RELU3) -> 512 bytes
+        OUT_BYTES    = output_size * 2       # OUTBUF (43)   -> 86 bytes
+
+        b.label('DBG_RUN')
+        # --- Prompt + read one query line (reuse READ_INPUT) -------------
+        b.call_addr(TI_ClrScrn)
+        b.call_addr(TI_HomeUp)
+        b.ld_a_n(ord('>'))
+        b.call_addr(TI_PutC)
+        b.ld_a_n(ord(' '))
+        b.call_addr(TI_PutC)
+        b.call('READ_INPUT')
+        # If MODE pressed -> quit cleanly.
+        b.ld_a_mem_label('RI_FLAG')
+        b.or_a()
+        b.jp_nz('DBG_EXIT')
+
+        # --- Build the input vector exactly like production -------------
+        b.call('TOKENIZE')      # query -> TOKBUF[0:256]
+        b.call('CLEAR_CTX')     # ctx = 8 spaces, encode -> TOKBUF[256:512]
+
+        # genpos = 0 so LAYER4_START (start bias) is used, matching first char.
+        b.xor_a()
+        b.ld_mem_label_a('GENPOS')
+
+        # P0 sanity: copy AVPTR0 into DBG_P0 for display.
+        b.ld_hl_mem_label('AVPTR0')
+        b.ld_mem_label_hl('DBG_P0')
+
+        # --- TOK checksum (TOKBUF) --------------------------------------
+        b.ld_hl_label('TOKBUF')
+        b.ld_bc_nn(TOKBUF_BYTES)
+        b.call('CHECKSUM')
+        b.ld_hl_mem_label('DBGACC')
+        b.ld_mem_label_hl('DBG_TOK')
+
+        # --- LAYER1 + RELU1 -> BUF_A (512) ------------------------------
+        b.call('LAYER1')
+        b.call('RELU1')
+        b.ld_hl_label('BUF_A')
+        b.ld_bc_nn(L1_BYTES)
+        b.call('CHECKSUM')
+        b.ld_hl_mem_label('DBGACC')
+        b.ld_mem_label_hl('DBG_L1')
+
+        # --- LAYER2A/B + RELU2 -> BUF_B[..512] (full 512 outputs) -------
+        b.call('LAYER2A')
+        b.call('LAYER2B')
+        b.call('RELU2')
+        b.ld_hl_label('BUF_B')      # BUF_B then BUF_B_MID are contiguous
+        b.ld_bc_nn(L2_BYTES)
+        b.call('CHECKSUM')
+        b.ld_hl_mem_label('DBGACC')
+        b.ld_mem_label_hl('DBG_L2')
+
+        # --- LAYER3 + RELU3 -> BUF_A (256) ------------------------------
+        b.call('LAYER3')
+        b.call('RELU3')
+        b.ld_hl_label('BUF_A')
+        b.ld_bc_nn(L3_BYTES)
+        b.call('CHECKSUM')
+        b.ld_hl_mem_label('DBGACC')
+        b.ld_mem_label_hl('DBG_L3')
+
+        # --- LAYER4 (genpos=0 -> start bias) -> OUTBUF (43) -------------
+        b.call('LAYER4_START')
+        b.ld_hl_label('OUTBUF')
+        b.ld_bc_nn(OUT_BYTES)
+        b.call('CHECKSUM')
+        b.ld_hl_mem_label('DBGACC')
+        b.ld_mem_label_hl('DBG_OUT')
+
+        # --- ARGMAX -> RESULT (index); fetch winning logit (LE16) -------
+        b.call('ARGMAX')
+        # DBG_ARGV = OUTBUF[RESULT] as signed 16-bit, sign-extended to 24 bits.
+        # OUTBUF stores each logit as a little-endian 16-bit word (2 bytes/elem).
+        b.ld_a_mem_label('RESULT')
+        b.ld_hl_nn(0)
+        b.ld_l_a()
+        b.add_hl_hl()                 # HL = index*2 (16-bit element stride)
+        b.ld_de_label('OUTBUF')
+        b.add_hl_de()                 # HL -> &OUTBUF[RESULT]
+        b.ld_e_hl()                   # E = low byte
+        b.inc_hl()
+        b.ld_d_hl()                   # D = high byte -> DE = logit (LE16)
+        # Store the two value bytes, then a third sign byte, into DBG_ARGV.
+        b.ld_a_e()
+        b.ld_mem_label_a('DBG_ARGV')      # DBG_ARGV+0 = low
+        b.ld_a_d()
+        b.ld_mem_label_a('DBG_ARGV1')     # DBG_ARGV+1 = high
+        b.ld_a_n(0)                       # sign byte = 0x00, or 0xFF if D bit7 set
+        b.bit_7_d()
+        b.jr_z('DBG_ARGV_HI0')
+        b.ld_a_n(0xFF)
+        b.label('DBG_ARGV_HI0')
+        b.ld_mem_label_a('DBG_ARGV2')     # DBG_ARGV+2 = sign
+
+        # --- Display everything -----------------------------------------
+        b.ld_iy_mem_label('SAVED_IY')   # restore IY before any TI-OS call
+        b.call_addr(TI_ClrScrn)
+        b.call_addr(TI_HomeUp)
+
+        # P0 (AVPTR0 runtime RAM address)
+        b.ld_a_n(ord('P'))
+        b.call_addr(TI_PutC)
+        b.ld_a_n(ord('0'))
+        b.call_addr(TI_PutC)
+        b.call('DBG_SP')
+        b.ld_hl_mem_label('DBG_P0')
+        b.call('DBG_PUT_HL6')
+        b.call_addr(TI_NewLine)
+
+        # TOK
+        b.call('DBG_LBL_TOK')
+        b.ld_hl_mem_label('DBG_TOK')
+        b.call('DBG_PUT_HL6')
+        b.call_addr(TI_NewLine)
+
+        # L1
+        b.call('DBG_LBL_L1')
+        b.ld_hl_mem_label('DBG_L1')
+        b.call('DBG_PUT_HL6')
+        b.call_addr(TI_NewLine)
+
+        # L2
+        b.call('DBG_LBL_L2')
+        b.ld_hl_mem_label('DBG_L2')
+        b.call('DBG_PUT_HL6')
+        b.call_addr(TI_NewLine)
+
+        # L3
+        b.call('DBG_LBL_L3')
+        b.ld_hl_mem_label('DBG_L3')
+        b.call('DBG_PUT_HL6')
+        b.call_addr(TI_NewLine)
+
+        # OUT
+        b.call('DBG_LBL_OUT')
+        b.ld_hl_mem_label('DBG_OUT')
+        b.call('DBG_PUT_HL6')
+        b.call_addr(TI_NewLine)
+
+        # ARG: index (2 hex) + space + winning logit (6 hex)
+        b.ld_a_n(ord('A'))
+        b.call_addr(TI_PutC)
+        b.ld_a_n(ord('R'))
+        b.call_addr(TI_PutC)
+        b.ld_a_n(ord('G'))
+        b.call_addr(TI_PutC)
+        b.call('DBG_SP')
+        b.ld_a_mem_label('RESULT')
+        b.call('DBG_PUT_A2')           # argmax index, 2 hex digits
+        b.call('DBG_SP')
+        b.ld_hl_mem_label('DBG_ARGV')
+        b.call('DBG_PUT_HL6')          # winning logit, 6 hex digits
+        b.call_addr(TI_NewLine)
+
+        # Wait for a key, then loop back for another query.
+        b.label('DBG_WAITK')
+        b.call_addr(TI_GetCSC)
+        b.or_a()
+        b.jr_z('DBG_WAITK')
+        b.cp_n(SK_MODE)
+        b.jr_z('DBG_EXIT')
+        b.jp('DBG_RUN')
+
+        b.label('DBG_EXIT')
+        b.call_addr(TI_ClrScrn)
+        b.call_addr(TI_HomeUp)
+        b.call_addr(TI_RunIndicOn)
+        b.ret()
+
+        # --- CHECKSUM: HL=ptr, BC=byte count -> DBGACC (24-bit sum) ------
+        # Sums every raw byte in [HL, HL+BC) into the 3-byte accumulator
+        # DBGACC/DBGACC1/DBGACC2 (low/mid/high), wrapping mod 2^24.
+        b.label('CHECKSUM')
+        b.xor_a()
+        b.ld_mem_label_a('DBGACC')
+        b.ld_mem_label_a('DBGACC1')
+        b.ld_mem_label_a('DBGACC2')
+        b.label('CKS_LOOP')
+        b.ld_a_b()
+        b.or_c()
+        b.ret_z()                     # count == 0 -> done
+        b.ld_a_hl()                   # A = next byte
+        b.push_hl()
+        b.push_bc()
+        b.ld_b_a()                    # B = incoming byte (HL/BC now free)
+        b.ld_a_mem_label('DBGACC')
+        b.add_a_b()
+        b.ld_mem_label_a('DBGACC')
+        b.ld_a_mem_label('DBGACC1')
+        b.adc_a_n(0)
+        b.ld_mem_label_a('DBGACC1')
+        b.ld_a_mem_label('DBGACC2')
+        b.adc_a_n(0)
+        b.ld_mem_label_a('DBGACC2')
+        b.pop_bc()
+        b.pop_hl()
+        b.inc_hl()
+        b.dec_bc()
+        b.jr('CKS_LOOP')
+
+        # --- DBG_PUT_HL6: print HL (24-bit) as 6 hex digits -------------
+        # DBGHEX/DBGHEX1/DBGHEX2 are 3 contiguous bytes (low/mid/high), so the
+        # 24-bit store writes all three; print high, mid, low (big-endian).
+        b.label('DBG_PUT_HL6')
+        b.ld_mem_label_hl('DBGHEX')
+        b.ld_a_mem_label('DBGHEX2')   # high byte
+        b.call('DBG_PUT_A2')
+        b.ld_a_mem_label('DBGHEX1')   # mid byte
+        b.call('DBG_PUT_A2')
+        b.ld_a_mem_label('DBGHEX')    # low byte
+        b.call('DBG_PUT_A2')
+        b.ret()
+
+        # --- DBG_PUT_A2: print A as 2 hex digits ------------------------
+        b.label('DBG_PUT_A2')
+        b.push_af()
+        b.rrca()
+        b.rrca()
+        b.rrca()
+        b.rrca()
+        b.call('DBG_NIB')
+        b.pop_af()
+        b.call('DBG_NIB')
+        b.ret()
+
+        # --- DBG_NIB: print low nibble of A as hex char -----------------
+        b.label('DBG_NIB')
+        b.and_n(0x0F)
+        b.cp_n(10)
+        b.jr_c('DBG_NIB_DIG')
+        b.add_a_n(ord('A') - 10)
+        b.jr('DBG_NIB_OUT')
+        b.label('DBG_NIB_DIG')
+        b.add_a_n(ord('0'))
+        b.label('DBG_NIB_OUT')
+        b.call_addr(TI_PutC)
+        b.ret()
+
+        # --- DBG_SP: print a space --------------------------------------
+        b.label('DBG_SP')
+        b.ld_a_n(ord(' '))
+        b.call_addr(TI_PutC)
+        b.ret()
+
+        # --- Label printers (avoid string-table machinery) --------------
+        def emit_label_printer(name, text):
+            b.label(name)
+            for ch in text:
+                b.ld_a_n(ord(ch))
+                b.call_addr(TI_PutC)
+            b.call('DBG_SP')
+            b.ret()
+        emit_label_printer('DBG_LBL_TOK', 'TOK')
+        emit_label_printer('DBG_LBL_L1', 'L1')
+        emit_label_printer('DBG_LBL_L2', 'L2')
+        emit_label_printer('DBG_LBL_L3', 'L3')
+        emit_label_printer('DBG_LBL_OUT', 'OUT')
+
     # === DATA ===
 
     # Character table (43 chars)
@@ -1979,32 +1644,17 @@ def build_autoreg(model_path: str = 'model.npz'):
     # Scan code -> ASCII lookup table (256 bytes)
     build_scan_table(b)
 
-    # Unsure message
-    b.label('UNSURE_MSG')
-    for c in 'JUST ASK':
-        b.db(ord(c))
-    b.db(0)
-
-    # Fallback messages
-    b.label('FB_MSG0')
-    for c in 'TRY AGAIN':
-        b.db(ord(c))
-    b.db(0)
-
-    b.label('FB_MSG1')
-    for c in 'BEATS ME':
-        b.db(ord(c))
-    b.db(0)
-
-    b.label('FB_MSG2')
-    for c in 'NOT SURE':
-        b.db(ord(c))
-    b.db(0)
-
-    # Variables -- 24-bit accumulator, 16-bit counters, 24-bit pointers
-    b.label('NEURCNT'); b.dw(0)
-    b.label('INCNT');   b.dw(0)
-    b.label('WTCNT');   b.dw(0)
+    # Variables -- 24-bit accumulator, 24-bit counters, 24-bit pointers
+    #
+    # NEURCNT/INCNT/WTCNT are 3-byte (24-bit) so their loads/stores are full
+    # 24-bit ops (LD HL,nn / LD HL,(nn) / LD (nn),HL).  A 24-bit LD HL,nn clears
+    # all 24 bits of HL (the .SIS 16-bit LD HL,nn did NOT -- caveat 4 -- leaving a
+    # stale upper byte), and a 24-bit store writes exactly 3 bytes into a 3-byte
+    # slot, so it can never under/overrun into the adjacent SAVW weight pointer.
+    # This is the uninitialized-state / pointer-corruption fix.
+    b.label('NEURCNT'); b.d3(0)
+    b.label('INCNT');   b.d3(0)
+    b.label('WTCNT');   b.d3(0)
     b.label('SAVW');    b.d3(0)
     b.label('SAVB');    b.d3(0)
     b.label('CURIN');   b.d3(0)
@@ -2020,10 +1670,6 @@ def build_autoreg(model_path: str = 'model.npz'):
     b.label('RESULT');  b.db(0)
     b.label('GENCNT');  b.db(0)
     b.label('GENPOS');  b.db(0)       # Generation position (0-based, for dual bias)
-    b.label('LASTCH');  b.db(0)       # Last char for repeat detection
-    b.label('REPCNT');  b.db(0)       # Repeat count
-    b.label('MARGIN_L'); b.db(0)      # Confidence margin low byte
-    b.label('MARGIN_H'); b.db(0)      # Confidence margin high byte
     b.label('TOKLEN');  b.db(0)
     b.label('TOKC1');   b.db(0)
     b.label('TOKC2');   b.db(0)
@@ -2039,30 +1685,6 @@ def build_autoreg(model_path: str = 'model.npz'):
     b.label('SAVED_IY'); b.d3(0)
     b.label('INPBUF'); b.ds(62)
 
-    # D_J Context Attention state (295 bytes)
-    b.label('CTX_KEY');   b.ds(128)   # 32 slots x 4 bytes
-    b.label('CTX_VAL');   b.ds(128)   # 32 slots x 4 bytes
-    b.label('CTX_AGE');   b.ds(32)    # 32 slots x 1 byte
-    b.label('CTX_QUERY'); b.ds(4)     # Current query vector
-    b.label('CTX_SCORE'); b.db(0)
-    b.label('CTX_BEST');  b.db(0)
-    b.label('CTX_WSLOT'); b.db(0)
-
-    # Attention temp variables
-    b.label('CA_SLOT');   b.db(0)
-    b.label('CA_KPTR');   b.d3(0)
-    b.label('CA_VPTR');   b.d3(0)
-    b.label('CA_ACC');    b.db(0)
-    b.label('CA_DIM');    b.db(0)
-    b.label('CA_Q');      b.db(0)
-    b.label('CA_K');      b.db(0)
-    b.label('CA_SIGN');   b.db(0)
-    b.label('CA_ABSQ');   b.db(0)
-    b.label('CW_IDX');    b.db(0)
-    b.label('CW_DIM');    b.db(0)
-    b.label('CW_KPTR');   b.d3(0)
-    b.label('CW_VPTR');   b.d3(0)
-
     # Computation buffers
     b.label('TOKBUF'); b.ds(input_size * 2)
     max_hidden = 512
@@ -2075,6 +1697,11 @@ def build_autoreg(model_path: str = 'model.npz'):
     for i in range(len(APPVAR_NAMES)):
         b.label(f'AVPTR{i}'); b.d3(0)
 
+    # Scratch for the RAM-vs-archived pointer test: a 3-byte slot whose high
+    # byte (AVTMP_HI, offset +2) is read to classify ChkFindSym's data pointer.
+    b.label('AVTMP'); b.db(0); b.db(0)
+    b.label('AVTMP_HI'); b.db(0)
+
     # AppVar name data
     for i, name in enumerate(APPVAR_NAMES):
         b.label(f'AVNAME{i}')
@@ -2085,6 +1712,28 @@ def build_autoreg(model_path: str = 'model.npz'):
     # Archive tracking flags
     for i in range(len(APPVAR_NAMES)):
         b.label(f'AVARCED{i}'); b.db(0)
+
+    # Debug-only scratch (emitted only when debug=True so production output is
+    # byte-for-byte unchanged). 24-bit checksum slots use d3 (3-byte) so the
+    # 24-bit LD (nn),HL store fills them exactly. DBGACC/DBGHEX/DBG_ARGV are
+    # three CONTIGUOUS single bytes (low, mid, high) so a 24-bit load/store sees
+    # them as one little-endian 24-bit value.
+    if debug:
+        b.label('DBG_P0');  b.d3(0)
+        b.label('DBG_TOK'); b.d3(0)
+        b.label('DBG_L1');  b.d3(0)
+        b.label('DBG_L2');  b.d3(0)
+        b.label('DBG_L3');  b.d3(0)
+        b.label('DBG_OUT'); b.d3(0)
+        b.label('DBGACC');  b.db(0)
+        b.label('DBGACC1'); b.db(0)
+        b.label('DBGACC2'); b.db(0)
+        b.label('DBGHEX');  b.db(0)
+        b.label('DBGHEX1'); b.db(0)
+        b.label('DBGHEX2'); b.db(0)
+        b.label('DBG_ARGV');  b.db(0)
+        b.label('DBG_ARGV1'); b.db(0)
+        b.label('DBG_ARGV2'); b.db(0)
 
     return b, appvar_blobs
 
@@ -2099,22 +1748,35 @@ if __name__ == '__main__':
                         help='Output .8xp file')
     parser.add_argument('--name', '-n', type=str, default=None,
                         help='Program name on calculator (max 8 chars, default: from output filename)')
+    parser.add_argument('--debug', action='store_true',
+                        help='Build an instrumented DEBUG program (NEOCHAT_DBG.8xp) that '
+                             'dumps per-layer buffer checksums. Reuses the SAME weight '
+                             'AppVars (NEOA-D); does not touch the production build.')
     args = parser.parse_args()
 
-    # Derive program name from output filename if not specified
+    # In --debug mode, default the output to NEOCHAT_DBG.8xp (unless the user
+    # overrode -o) so the production NEOCHAT.8xp is never touched.
+    default_output = os.path.join(os.path.dirname(__file__), 'bin', 'NEOCHAT.8xp')
+    if args.debug and args.output == default_output:
+        args.output = os.path.join(os.path.dirname(__file__), 'bin', 'NEOCHAT_DBG.8xp')
+
+    # Derive program name from output filename if not specified. The on-calc
+    # name is capped at 8 chars, so the debug build is launched as prgmNEOCDBG.
     if args.name:
         prog_name = args.name
+    elif args.debug:
+        prog_name = 'NEOCDBG'
     else:
         prog_name = os.path.splitext(os.path.basename(args.output))[0]
 
-    print(f"Building NEOCHAT (24-bit native) -> {args.output}...\n")
+    print(f"Building NEOCHAT{' [DEBUG]' if args.debug else ''} (24-bit native) -> {args.output}...\n")
 
-    b, appvar_blobs = build_autoreg(args.model)
+    b, appvar_blobs = build_autoreg(args.model, debug=args.debug)
 
     # Show key addresses
     print("\nKey addresses:")
     for name in ['START', 'GENERATE', 'LAYER', 'MULADD', 'ARGMAX', 'TOKENIZE',
-                 'UPDATE_CTX', 'CTX_ATTEND', 'CTX_WRITE', 'CTX_CLEAR',
+                 'UPDATE_CTX', 'ENCODE_CTX', 'CLEAR_CTX',
                  'CHARTBL', 'TOKBUF', 'OUTBUF', 'BUF_A', 'BUF_B']:
         if name in b.labels:
             print(f"  {name}: {b.labels[name]:06X}h")
@@ -2151,19 +1813,28 @@ if __name__ == '__main__':
         'total_weight': total_av,
     })
 
-    # Within budget: write the AppVar files.
+    # Within budget: write the AppVar files. The DEBUG build reuses the SAME
+    # weight AppVars as production (NEOA-D), so we skip re-writing the .8xv files
+    # to avoid touching production artifacts.
     output_dir = os.path.dirname(args.output) or '.'
-    for av_name, av_data in appvar_blobs.items():
-        xv_data = build_8xv(av_data, av_name)
-        av_path = os.path.join(output_dir, f'{av_name}.8xv')
-        with open(av_path, 'wb') as f:
-            f.write(xv_data)
-        print(f"  wrote {av_path}")
+    if not args.debug:
+        for av_name, av_data in appvar_blobs.items():
+            xv_data = build_8xv(av_data, av_name)
+            av_path = os.path.join(output_dir, f'{av_name}.8xv')
+            with open(av_path, 'wb') as f:
+                f.write(xv_data)
+            print(f"  wrote {av_path}")
 
     print(f"Program name: {prog_name.upper()[:8]}")
     print(f"Saved to {args.output}")
-    print(f"\nTransfer ALL files to calculator:")
-    print(f"  {args.output}")
-    for av_name in appvar_blobs:
-        print(f"  {av_name}.8xv")
-    print(f"Run: Asm(prgm{prog_name.upper()[:8]})")
+    if args.debug:
+        print(f"\n[DEBUG] Transfer to calculator:")
+        print(f"  {args.output}   (the instrumented program)")
+        print(f"  plus the existing weight AppVars: " + ', '.join(f'{n}.8xv' for n in appvar_blobs))
+        print(f"Run: Asm(prgm{prog_name.upper()[:8]})")
+    else:
+        print(f"\nTransfer ALL files to calculator:")
+        print(f"  {args.output}")
+        for av_name in appvar_blobs:
+            print(f"  {av_name}.8xv")
+        print(f"Run: Asm(prgm{prog_name.upper()[:8]})")

@@ -209,6 +209,9 @@ class eZ80Builder:
 
     def ld_hl_mem_label(self, label): self.emit(0x2A); self.fixup_word(label)
     def ld_mem_label_hl(self, label): self.emit(0x22); self.fixup_word(label)
+    # WARNING: the DE/BC stores below emit ED 53 / ED 43, which can corrupt
+    # adjacent memory on real hardware (caveat #2). For pointers, move the value
+    # into HL (e.g. ex_de_hl) and use the safe ld_mem_label_hl (0x22) instead.
     def ld_mem_label_de(self, label): self.emit(0xED, 0x53); self.fixup_word(label)
     def ld_mem_label_bc(self, label): self.emit(0xED, 0x43); self.fixup_word(label)
     def ld_bc_mem_label(self, label): self.emit(0xED, 0x4B); self.fixup_word(label)
@@ -281,6 +284,8 @@ class eZ80Builder:
     def add_a_h(self): self.emit(0x84)
     def add_a_l(self): self.emit(0x85)
     def add_a_hl(self): self.emit(0x86)   # ADD A,(HL)
+    def adc_a_n(self, val): self.emit(0xCE, val & 0xFF)  # ADC A,n
+    def adc_a_a(self): self.emit(0x8F)
     def adc_a_b(self): self.emit(0x88)
     def adc_a_d(self): self.emit(0x8A)
     def adc_a_hl(self): self.emit(0x8E)   # ADC A,(HL)

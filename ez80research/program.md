@@ -96,6 +96,15 @@ training data, or build generalization enabling architectures the fixed NEOA-D l
 forbids. Within the current hard constraints, the search space is exhausted — but per
 "When to stop", keep generating genuinely-novel ideas anyway.
 
+**Sim vs device (learned the hard way):** IntAcc is the *simulation* (`_forward_int`).
+The harness builds the binary but does NOT compare its numerics to the sim, so a
+device/sim divergence is SILENT. A released build once ran fine in the sim yet emitted
+on-calc gibberish, because `buildchat84.py` carried device-only mechanisms (context
+attention, EOS/confidence/repeat heuristics) absent from the sim, plus an eZ80
+16-bit-counter quirk corrupting a weight pointer. The fix was to make the calc a faithful
+mirror of the sim (pure argmax + dual bias, full 24-bit counters). If you change
+`_forward_int`, mirror it in `buildchat84.py`; never add device-only behavior.
+
 ## Hard constraints — NEVER break these (any violation discards the experiment)
 
 1. **Integer-only inference.** The metric is measured with `use_int=True`. You

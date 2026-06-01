@@ -41,7 +41,7 @@ RAM_BUDGET_BYTES = 150 * 1024     # >=150 KB free RAM (README)
 MAX_APPVAR_BYTES = 65535
 
 # Fixed RAM consumers besides the packed weights.
-RUNTIME_BUFFER_BYTES = 3 * 1024   # TOKBUF/BUF_A/BUF_B/OUTBUF + D_J context state
+RUNTIME_BUFFER_BYTES = 3 * 1024   # TOKBUF/BUF_A/BUF_B/OUTBUF working buffers
 PROGRAM_ESTIMATE_BYTES = 8 * 1024  # program code, for the arch-only pre-gate only
 
 

@@ -52,7 +52,7 @@ Training data -> `train.py` -> model (.pt) -> `exportmodel.py` -> model (.npz) -
 - **`libqat.py`** -- Quantization-aware training primitives. OverflowAwareLinear with 2-bit weights {-2,-1,0,+1}, straight-through estimator, 24-bit overflow regularization.
 - **`libez80.py`** -- eZ80 ADL-mode machine code builder. Emits raw instructions with label/fixup system for 24-bit address resolution. Includes .LIS/.SIS prefixed instructions for 16-bit math within 24-bit addressing mode.
 - **`loadmodel.py`** -- Loads models from .pt (PyTorch) or .npz (NumPy) formats.
-- **`buildchat84.py`** -- Converts model to Ti-84 CE binary. Emits eZ80 code for trigram tokenization, neural net inference (multiply-accumulate loops), argmax, D_J Context Attention, and TI-OS I/O. Outputs .8xp program + .8xv weight AppVars.
+- **`buildchat84.py`** -- Converts model to Ti-84 CE binary. Emits eZ80 code for trigram tokenization, neural net inference (multiply-accumulate loops), argmax, and TI-OS I/O. On-device generation is a faithful mirror of train.py's integer path (`_forward_int`/`generate_response`): pure argmax + dual bias, stop at EOS or 50 chars, no device-only heuristics. Outputs .8xp program + .8xv weight AppVars.
 - **`exportmodel.py`** -- Exports PyTorch checkpoint to .npz with 2-bit quantized weights.
 - **`prepare_data.py`** -- Downloads nq_open dataset, combines with personality data, outputs shuffled training file.
 
@@ -66,7 +66,11 @@ Training data -> `train.py` -> model (.pt) -> `exportmodel.py` -> model (.npz) -
 
 ### eZ80 ADL mode caveats
 
-See libez80.py header for 5 documented hardware caveats affecting .LIS prefixed instructions, IY register usage, and 8-bit register loads.
+See libez80.py header for 5 documented hardware caveats affecting .LIS prefixed instructions, IY register usage, and 8-bit register loads. Note: loop counters that live next to pointers in RAM (NEURCNT/INCNT/WTCNT, adjacent to the weight pointer SAVW) use full 24-bit loads/stores -- NOT .SIS/.LIS 16-bit ops -- because a `.SIS LD HL,nn` does not clear register bits 16-23, and a stale upper byte could corrupt the adjacent pointer.
+
+### Source of truth: the device must mirror the Python sim
+
+The Python integer path (`train.py._forward_int` and `generate_response`) is the source of truth; `buildchat84.py` must reproduce it exactly. The build is only checked for compiling and fitting RAM -- its numerics are **not** compared against the sim -- so a device/sim divergence is **silent**. Do NOT add on-device-only behavior (context attention, logit/EOS heuristics, repeat fallbacks, etc.); generation is a plain argmax + dual bias that stops at EOS or 50 chars, identical to `generate_response`. A released build once shipped device-only mechanisms + a 16-bit-counter quirk and produced on-calc gibberish; both were fixed by making the calc faithful to the sim.
 
 ### Dependencies
 
