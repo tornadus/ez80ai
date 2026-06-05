@@ -26,7 +26,8 @@ import numpy as np
 import struct
 
 from libez80 import eZ80Builder
-from loadmodel import load_model_params, load_dual_bias_threshold
+from loadmodel import load_model_params, load_dual_bias_threshold, load_spec_from_model
+import sizes
 
 # Ti-84 Plus CE TI-OS routine addresses
 TI_ClrScrn = 0x020814       # Clear home screen
@@ -243,9 +244,11 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
     assert num_chars == 43, f"Expected 43-char charset, got {num_chars}"
     assert eos_idx == 42, f"Expected EOS at index 42, got {eos_idx}"
 
-    # Discover layers (exclude fc4_bias_start which is a secondary bias, not a layer)
+    # Discover layers (exclude fcN_bias_start which is a secondary bias, not a layer).
+    # Sort NUMERICALLY by the fc index so fc10 follows fc9 (not alphabetical).
     layer_keys = [k for k in params.keys() if k.endswith('_weight')]
-    layer_names = sorted(k.replace('_weight', '') for k in layer_keys)
+    layer_names = sorted((k.replace('_weight', '') for k in layer_keys),
+                         key=lambda nm: int(''.join(ch for ch in nm if ch.isdigit())))
     num_layers = len(layer_names)
 
     # Get layer dimensions
@@ -263,76 +266,107 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
     print(f"Input: {input_size} (128 query + 128 context)")
     print(f"Output: {output_size} characters")
 
-    # Check for dual bias
-    has_dual_bias = 'fc4_bias_start' in params
+    # Check for dual bias on the OUTPUT layer (its name is fcN, not hardcoded fc4).
+    has_dual_bias = f'{layer_names[-1]}_bias_start' in params
     # Position threshold the model was trained with (sim's DUAL_BIAS_THRESHOLD).
     # Driven from the model file so the device branch can never silently disagree
     # with the sim if the threshold is ever changed.
     dual_bias_threshold = load_dual_bias_threshold(model_path)
     if has_dual_bias:
-        print(f"Dual bias: fc4_bias (rest) + fc4_bias_start (first {dual_bias_threshold} chars)")
+        print(f"Dual bias: {layer_names[-1]}_bias (rest) + {layer_names[-1]}_bias_start "
+              f"(first {dual_bias_threshold} chars)")
     else:
         print("WARNING: No dual bias found in model")
 
-    # Pack weights and biases per original layer
-    packed_weights = []
-    biases = []
-    for name in layer_names:
-        packed_weights.append(pack_2bit_weights(params[f'{name}_weight']))
-        biases.append(params[f'{name}_bias'])
-
-    # === Build AppVar data blobs ===
-    # Split Layer 2 (512x512, 66KB) into two 256-output halves
+    # === Spec-driven, fully generic AppVar layout (the "sharder") ===
+    # Replaces the old hardcoded NEOA-D + manual layer-2 split. Each layer is
+    # split into output-neuron ranges ("shards") small enough to fit an AppVar,
+    # then shards are greedily packed into AppVars (<= MAX_APPVAR_BYTES each).
+    # For the baseline [512,512,256] arch this reproduces the exact NEOA-D blobs
+    # byte-for-byte (greedy + the same layer-2 split); for any other arch it just
+    # works. Output-neuron split points are byte-aligned because every input dim
+    # is a multiple of 4 under 2-bit packing (asserted below).
+    spec = load_spec_from_model(model_path)
+    shifts = spec['inter_layer_shift']
+    ascale = spec['activation_scale']
+    assert len(shifts) == num_layers, (len(shifts), num_layers)
+    MAX_AV = sizes.MAX_APPVAR_BYTES
+    out_name = layer_names[-1]
 
     def pack_bias_bytes(bias_arr):
         """Pack bias array as little-endian uint16 bytes (two's complement)."""
         data = bytearray()
         for v in bias_arr:
-            val = int(v) & 0xFFFF
-            data.extend(struct.pack('<H', val))
+            data.extend(struct.pack('<H', int(v) & 0xFFFF))
         return bytes(data)
 
-    # Layer 2 split: first 256 outputs and last 256 outputs
-    w2 = params[f'{layer_names[1]}_weight']  # Shape: (512, 512)
-    b2 = params[f'{layer_names[1]}_bias']    # Shape: (512,)
-    w2a = w2[:256, :]   # First 256 output neurons
-    w2b = w2[256:, :]   # Last 256 output neurons
-    b2a = b2[:256]
-    b2b = b2[256:]
+    def av_name(i):
+        """NEOA..NEOZ, then NEOAA.. (<=8 chars). i=0..3 -> NEOA..NEOD (baseline)."""
+        return 'NEO' + (chr(65 + i) if i < 26
+                        else chr(65 + i // 26 - 1) + chr(65 + i % 26))
 
-    # NEOD: L3 weights + L3 biases + L4 weights + L4 bias (rest) + L4 bias_start
-    # NOTE: L4 biases are multiplied by 4 to compensate for the LAYER routine's
-    # divide-by-4 step.  In Python _forward_int, the output layer adds bias AFTER
-    # the divide, but the eZ80 LAYER routine adds bias BEFORE dividing.
-    # Pre-scaling by 4 ensures: (matmul + 4*bias) >> 2 == (matmul >> 2) + bias
-    l3_w_packed = pack_2bit_weights(params[f'{layer_names[2]}_weight'])
-    l3_b_packed = pack_bias_bytes(params[f'{layer_names[2]}_bias'])
-    l4_w_packed = pack_2bit_weights(params[f'{layer_names[3]}_weight'])
-    l4_b_packed = pack_bias_bytes(params[f'{layer_names[3]}_bias'] * 4)
-    l4_bs_packed = pack_bias_bytes(params['fc4_bias_start'] * 4) if has_dual_bias else l4_b_packed
+    # Per-layer shard ranges; split any layer whose packed weights+bias exceed
+    # one AppVar. The output layer carries TWO bias sets (rest + start).
+    layer_plan = []
+    flat_shards = []
+    for li, name in enumerate(layer_names):
+        w = params[f'{name}_weight']
+        n_out, n_in = int(w.shape[0]), int(w.shape[1])
+        assert n_in % 4 == 0, f"layer {li} input dim {n_in} must be a multiple of 4"
+        is_out = (li == num_layers - 1)
+        bias_sets = 2 if (is_out and has_dual_bias) else 1
+        layer_bytes = (n_out * n_in) // 4 + n_out * 2 * bias_sets
+        nsplit = max(1, -(-layer_bytes // MAX_AV))
+        base, rem, lo, ranges = n_out // nsplit, n_out % nsplit, 0, []
+        for k in range(nsplit):
+            sz = base + (1 if k < rem else 0)
+            ranges.append((lo, lo + sz)); lo += sz
+        layer_plan.append({'li': li, 'n_in': n_in, 'n_out': n_out,
+                           'shift': shifts[li], 'is_out': is_out, 'shards': []})
+        for (a, c) in ranges:
+            flat_shards.append((li, a, c))
 
-    appvar_blobs = {
-        'NEOA': pack_2bit_weights(params[f'{layer_names[0]}_weight']) +
-                 pack_bias_bytes(params[f'{layer_names[0]}_bias']),
-        'NEOB': pack_2bit_weights(w2a) + pack_bias_bytes(b2a),
-        'NEOC': pack_2bit_weights(w2b) + pack_bias_bytes(b2b),
-        'NEOD': l3_w_packed + l3_b_packed + l4_w_packed + l4_b_packed + l4_bs_packed,
-    }
+    def shard_blobs(li, lo, hi):
+        name = layer_names[li]
+        wb = pack_2bit_weights(params[f'{name}_weight'][lo:hi, :])
+        if li == num_layers - 1:                       # output: bias pre-scaled
+            sh = shifts[li]
+            brest = pack_bias_bytes(params[f'{name}_bias'][lo:hi] * (1 << sh))
+            bstart = (pack_bias_bytes(params[f'{out_name}_bias_start'][lo:hi] * (1 << sh))
+                      if has_dual_bias else brest)
+            return wb, brest, bstart
+        return wb, pack_bias_bytes(params[f'{name}_bias'][lo:hi]), None
 
-    # Compute weight/bias offsets within each AppVar
-    l1_wsize = len(pack_2bit_weights(params[f'{layer_names[0]}_weight']))
-    l2a_wsize = len(pack_2bit_weights(w2a))
-    l2b_wsize = len(pack_2bit_weights(w2b))
-    l3_wsize = len(l3_w_packed)
-    l3_bsize = len(l3_b_packed)
-    l4_woffset = l3_wsize + l3_bsize  # L4 weights start in NEOD
-    l4_wsize = len(l4_w_packed)
-    l4_boffset = l4_woffset + l4_wsize  # L4 rest bias start in NEOD
-    l4_bsize = len(l4_b_packed)
-    l4_bs_offset = l4_boffset + l4_bsize  # L4 start bias in NEOD
+    appvar_blobs = {}
+    av_idx, cur = 0, bytearray()
+    for (li, lo, hi) in flat_shards:
+        wb, b1, b2 = shard_blobs(li, lo, hi)
+        sz = len(wb) + len(b1) + (len(b2) if b2 is not None else 0)
+        if len(cur) > 0 and len(cur) + sz > MAX_AV:
+            appvar_blobs[av_name(av_idx)] = bytes(cur); av_idx += 1; cur = bytearray()
+        w_off = len(cur); cur += wb
+        b_off = len(cur); cur += b1
+        bs_off = None
+        if b2 is not None:
+            bs_off = len(cur); cur += b2
+        layer_plan[li]['shards'].append(
+            {'av': av_idx, 'w_off': w_off, 'b_off': b_off, 'bs_off': bs_off,
+             'lo': lo, 'hi': hi})
+    appvar_blobs[av_name(av_idx)] = bytes(cur)
+    av_names = [av_name(i) for i in range(av_idx + 1)]
 
-    for name, blob in appvar_blobs.items():
-        print(f"  AppVar {name}: {len(blob):,} bytes ({len(blob)/1024:.1f} KB)")
+    # Ping-pong buffer assignment: layer 0 reads TOKBUF, the output layer writes
+    # OUTBUF, hidden layers alternate PING/PONG (in != out every layer).
+    hidden_out_sizes = layer_sizes[1:-1]
+    max_hidden = max(hidden_out_sizes) if hidden_out_sizes else output_size
+    pingpong = ['PING', 'PONG']
+    for li, plan in enumerate(layer_plan):
+        plan['in_buf'] = 'TOKBUF' if li == 0 else pingpong[(li - 1) % 2]
+        plan['out_buf'] = 'OUTBUF' if plan['is_out'] else pingpong[li % 2]
+
+    for nm in av_names:
+        blob = appvar_blobs[nm]
+        print(f"  AppVar {nm}: {len(blob):,} bytes ({len(blob)/1024:.1f} KB)")
 
     # === Now build the program (code only, no weights) ===
 
@@ -356,7 +390,7 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
     b.call_addr(TI_RunIndicOff)
 
     # === Load AppVars ===
-    for i, av_name in enumerate(APPVAR_NAMES):
+    for i, _nm in enumerate(av_names):
         b.ld_hl_label(f'AVNAME{i}')
         b.call_addr(TI_Mov9ToOP1)
         b.call_addr(TI_ChkFindSym)
@@ -487,7 +521,7 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
     b.label('CHAT_EXIT')
     # Re-archive any AppVars we unarchived at startup
     b.ld_iy_mem_label('SAVED_IY')
-    for i, av_name in enumerate(APPVAR_NAMES):
+    for i, _nm in enumerate(av_names):
         b.ld_a_mem_label(f'AVARCED{i}')
         b.or_a()
         b.jr_z(f'AV_NOARC{i}')
@@ -644,24 +678,8 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
     b.ld_mem_label_a('GENPOS')     # Generation position counter (0-based)
 
     b.label('GENLOOP')
-    # 5 virtual layers: L1 -> RELU1 -> L2A+L2B -> RELU2 -> L3 -> RELU3 -> L4
-    b.call('LAYER1')     # 256->512, output to BUF_A
-    b.call('RELU1')      # ReLU BUF_A (512 values)
-    b.call('LAYER2A')    # 512->256, first half to BUF_B[0..255]
-    b.call('LAYER2B')    # 512->256, second half to BUF_B[256..511]
-    b.call('RELU2')      # ReLU BUF_B (512 values)
-    b.call('LAYER3')     # 512->256, output to BUF_A
-    b.call('RELU3')      # ReLU BUF_A (256 values)
-
-    # Select LAYER4 variant based on GENPOS (threshold from the model file)
-    b.ld_a_mem_label('GENPOS')
-    b.cp_n(dual_bias_threshold)
-    b.jr_nc('GEN_L4_REST')
-    b.call('LAYER4_START')   # first DUAL_BIAS_THRESHOLD chars: use start bias
-    b.jr('GEN_L4_DONE')
-    b.label('GEN_L4_REST')
-    b.call('LAYER4_REST')    # subsequent: use rest bias
-    b.label('GEN_L4_DONE')
+    # One generic forward pass (all layers + genpos-selected output) -> OUTBUF.
+    b.call('FORWARD')
 
     # === ARGMAX -> RESULT (plain argmax over logits) ===
     b.call('ARGMAX')
@@ -852,12 +870,12 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
     b.add_hl_bc()
     b.add_hl_de()
 
-    # Increment bucket value by 32
+    # Increment bucket value by activation_scale (device folds the *scale here)
     b.ld_e_hl()
     b.inc_hl()
     b.ld_d_hl()
     b.push_hl()
-    b.ld_hl_nn_16(32)
+    b.ld_hl_nn_16(ascale)
     b.add_hl_de_16()
     b.ex_de_hl()
     b.pop_hl()
@@ -877,56 +895,69 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
     b.jp('ENCODE_CTX')
 
 
-    # === Layer dispatch stubs ===
-    def emit_layer_stub(label, av_idx, w_offset, b_offset, in_buf, out_buf,
-                        in_size, out_size, fall_through=False):
-        """Emit a layer dispatch stub that loads pointers from an AppVar."""
+    # === Layer dispatch stubs (generic; one per shard) ===
+    # Each stub loads its weight/bias pointers (AVPTRn + offset), input/output
+    # buffers (output offset for split layers), dimensions, and the per-layer
+    # right-shift (LSHIFT, applied at runtime in LAYER), then jumps to LAYER.
+    def emit_stub(label, av_idx, w_off, b_off, in_buf, out_buf, out_off,
+                  in_size, out_size, shift):
         b.label(label)
-        # HL = weight pointer = AVPTR[av_idx] + w_offset
+        b.ld_hl_mem_label(f'AVPTR{av_idx}')        # HL = weight pointer
+        if w_off > 0:
+            b.ld_de_nn(w_off); b.add_hl_de()
+        b.ld_ix_label(in_buf)                       # IX = input buffer
+        if out_off > 0:                            # IY = output buffer + offset
+            b.push_hl()
+            b.ld_hl_label(out_buf); b.ld_de_nn(out_off); b.add_hl_de()
+            b.push_hl(); b.pop_iy()
+            b.pop_hl()
+        else:
+            b.ld_iy_label(out_buf)
+        b.push_hl()                                # DE = bias pointer
         b.ld_hl_mem_label(f'AVPTR{av_idx}')
-        if w_offset > 0:
-            b.ld_de_nn(w_offset)
-            b.add_hl_de()
-        # Save weight pointer, load bias pointer
-        b.push_hl()
-        b.ld_hl_mem_label(f'AVPTR{av_idx}')
-        b.ld_de_nn(b_offset)
-        b.add_hl_de()
-        b.push_hl()
-        b.pop_de()         # DE = bias pointer
-        b.pop_hl()         # HL = weight pointer
-        # Set buffers
-        b.ld_ix_label(in_buf)
-        b.ld_iy_label(out_buf)
-        # Set dimensions (24-bit loads + stores: clear full HL, write 3-byte slots)
-        b.push_hl()
-        b.ld_hl_nn(out_size)
-        b.ld_mem_label_hl('NEURCNT')
-        b.ld_hl_nn(in_size)
-        b.ld_mem_label_hl('INCNT')
+        if b_off > 0:
+            b.ld_de_nn(b_off); b.add_hl_de()
+        b.push_hl(); b.pop_de()
         b.pop_hl()
-        if not fall_through:
-            b.jp('LAYER')
+        b.push_hl()                                # dims (24-bit, see NEURCNT note)
+        b.ld_hl_nn(out_size); b.ld_mem_label_hl('NEURCNT')
+        b.ld_hl_nn(in_size); b.ld_mem_label_hl('INCNT')
+        b.pop_hl()
+        b.ld_a_n(shift); b.ld_mem_label_a('LSHIFT')  # per-layer right-shift
+        b.jp('LAYER')
 
-    # L1: 256->512 from NEOA (AVPTR0), weights at +0, biases at +l1_wsize
-    emit_layer_stub('LAYER1', 0, 0, l1_wsize, 'TOKBUF', 'BUF_A', 256, 512)
+    for plan in layer_plan:
+        li, in_buf, out_buf, shift = plan['li'], plan['in_buf'], plan['out_buf'], plan['shift']
+        for k, sh in enumerate(plan['shards']):
+            in_size, out_size, out_off = plan['n_in'], sh['hi'] - sh['lo'], sh['lo'] * 2
+            if plan['is_out']:
+                emit_stub(f'L{li}_R{k}', sh['av'], sh['w_off'], sh['b_off'],
+                          in_buf, out_buf, out_off, in_size, out_size, shift)
+                emit_stub(f'L{li}_S{k}', sh['av'], sh['w_off'], sh['bs_off'],
+                          in_buf, out_buf, out_off, in_size, out_size, shift)
+            else:
+                emit_stub(f'L{li}_{k}', sh['av'], sh['w_off'], sh['b_off'],
+                          in_buf, out_buf, out_off, in_size, out_size, shift)
 
-    # L2A: 512->256 from NEOB (AVPTR1)
-    emit_layer_stub('LAYER2A', 1, 0, l2a_wsize, 'BUF_A', 'BUF_B', 512, 256)
-
-    # L2B: 512->256 from NEOC (AVPTR2)
-    emit_layer_stub('LAYER2B', 2, 0, l2b_wsize, 'BUF_A', 'BUF_B_MID', 512, 256)
-
-    # L3: 512->256 from NEOD (AVPTR3), weights at +0, biases at +l3_wsize
-    emit_layer_stub('LAYER3', 3, 0, l3_wsize, 'BUF_B', 'BUF_A', 512, 256)
-
-    # L4_REST: 256->43 from NEOD (AVPTR3), weights at l4_woffset, bias at l4_boffset
-    emit_layer_stub('LAYER4_REST', 3, l4_woffset, l4_boffset,
-                    'BUF_A', 'OUTBUF', 256, output_size)
-
-    # L4_START: 256->43 from NEOD (AVPTR3), weights at l4_woffset, bias at l4_bs_offset
-    emit_layer_stub('LAYER4_START', 3, l4_woffset, l4_bs_offset,
-                    'BUF_A', 'OUTBUF', 256, output_size, fall_through=True)
+    # === FORWARD: full forward pass (all layers + genpos-selected output) ===
+    b.label('FORWARD')
+    for plan in layer_plan[:-1]:                    # hidden layers
+        for k in range(len(plan['shards'])):
+            b.call(f"L{plan['li']}_{k}")
+        b.ld_bc_nn(plan['n_out'])                   # ReLU over the full layer output
+        b.ld_hl_label(plan['out_buf'])
+        b.call('RELU')
+    out_plan = layer_plan[-1]
+    b.ld_a_mem_label('GENPOS')
+    b.cp_n(dual_bias_threshold)
+    b.jr_nc('FWD_REST')
+    for k in range(len(out_plan['shards'])):        # first chars: start bias
+        b.call(f"L{out_plan['li']}_S{k}")
+    b.ret()
+    b.label('FWD_REST')
+    for k in range(len(out_plan['shards'])):        # rest: rest bias
+        b.call(f"L{out_plan['li']}_R{k}")
+    b.ret()
 
     # === LAYER: Neural network layer computation ===
     # 24-bit native accumulator
@@ -1046,11 +1077,27 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
     b.ld_a_h()
     b.adc_a_b()                      # ADC A, B
 
-    # Arithmetic right shift by 2 (divide by 4)
-    for _ in range(2):
-        b.sra_a()                     # SRA A
-        b.rr_d()                      # RR D
-        b.rr_e()                      # RR E
+    # Arithmetic right shift by LSHIFT (per-layer divide; SRA;RR;RR = floor).
+    # Value is in A:D:E (high:mid:low); the loop preserves it across the counter
+    # load via push_af/pop_af. shift==0 -> no shift.
+    b.push_af()
+    b.ld_a_mem_label('LSHIFT')
+    b.ld_mem_label_a('LSHIFT_CNT')
+    b.pop_af()
+    b.label('LSH_LOOP')
+    b.push_af()
+    b.ld_a_mem_label('LSHIFT_CNT')
+    b.or_a()
+    b.jr_z('LSH_DONE')
+    b.dec_a()
+    b.ld_mem_label_a('LSHIFT_CNT')
+    b.pop_af()
+    b.sra_a()                         # SRA A
+    b.rr_d()                          # RR D
+    b.rr_e()                          # RR E
+    b.jr('LSH_LOOP')
+    b.label('LSH_DONE')
+    b.pop_af()
 
     # Store result to output buffer
     b.ld_iyd_e(0x00)                 # LD (IY+0), E
@@ -1109,23 +1156,7 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
     b.label('MA_RET')
     b.ret()
 
-    # === ReLU stubs ===
-    relu_configs = [
-        ('RELU1', 'BUF_A', 512),
-        ('RELU2', 'BUF_B', 512),
-        ('RELU3', 'BUF_A', 256),
-    ]
-    for idx, (label, buf_name, count) in enumerate(relu_configs):
-        b.label(label)
-        b.ld_bc_nn(0)
-        b.ld_c_n(count & 0xFF)
-        b.ld_b_n((count >> 8) & 0xFF)
-        b.ld_hl_label(buf_name)
-        if idx == len(relu_configs) - 1:
-            pass  # Fall through to RELU
-        else:
-            b.jr('RELU')
-
+    # === ReLU (HL = buffer pointer, BC = element count; set by FORWARD) ===
     b.label('RELU')
     b.ld_e_hl()
     b.inc_hl()
@@ -1340,7 +1371,7 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
     b.ld_e_hl()
     b.inc_hl()
     b.ld_d_hl()
-    b.ld_bc_nn_16(32)
+    b.ld_bc_nn_16(ascale)
     b.ex_de_hl()
     b.add_hl_bc_16()
     b.ex_de_hl()
@@ -1408,36 +1439,10 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
         b.ld_hl_mem_label('DBGACC')
         b.ld_mem_label_hl('DBG_TOK')
 
-        # --- LAYER1 + RELU1 -> BUF_A (512) ------------------------------
-        b.call('LAYER1')
-        b.call('RELU1')
-        b.ld_hl_label('BUF_A')
-        b.ld_bc_nn(L1_BYTES)
-        b.call('CHECKSUM')
-        b.ld_hl_mem_label('DBGACC')
-        b.ld_mem_label_hl('DBG_L1')
-
-        # --- LAYER2A/B + RELU2 -> BUF_B[..512] (full 512 outputs) -------
-        b.call('LAYER2A')
-        b.call('LAYER2B')
-        b.call('RELU2')
-        b.ld_hl_label('BUF_B')      # BUF_B then BUF_B_MID are contiguous
-        b.ld_bc_nn(L2_BYTES)
-        b.call('CHECKSUM')
-        b.ld_hl_mem_label('DBGACC')
-        b.ld_mem_label_hl('DBG_L2')
-
-        # --- LAYER3 + RELU3 -> BUF_A (256) ------------------------------
-        b.call('LAYER3')
-        b.call('RELU3')
-        b.ld_hl_label('BUF_A')
-        b.ld_bc_nn(L3_BYTES)
-        b.call('CHECKSUM')
-        b.ld_hl_mem_label('DBGACC')
-        b.ld_mem_label_hl('DBG_L3')
-
-        # --- LAYER4 (genpos=0 -> start bias) -> OUTBUF (43) -------------
-        b.call('LAYER4_START')
+        # --- Full forward pass -> OUTBUF, then checksum it --------------
+        # (Per-layer checksums are gone with the generalized codegen; the host
+        # faithfulness gate now verifies every layer at the byte level.)
+        b.call('FORWARD')
         b.ld_hl_label('OUTBUF')
         b.ld_bc_nn(OUT_BYTES)
         b.call('CHECKSUM')
@@ -1487,24 +1492,6 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
         # TOK
         b.call('DBG_LBL_TOK')
         b.ld_hl_mem_label('DBG_TOK')
-        b.call('DBG_PUT_HL6')
-        b.call_addr(TI_NewLine)
-
-        # L1
-        b.call('DBG_LBL_L1')
-        b.ld_hl_mem_label('DBG_L1')
-        b.call('DBG_PUT_HL6')
-        b.call_addr(TI_NewLine)
-
-        # L2
-        b.call('DBG_LBL_L2')
-        b.ld_hl_mem_label('DBG_L2')
-        b.call('DBG_PUT_HL6')
-        b.call_addr(TI_NewLine)
-
-        # L3
-        b.call('DBG_LBL_L3')
-        b.ld_hl_mem_label('DBG_L3')
         b.call('DBG_PUT_HL6')
         b.call_addr(TI_NewLine)
 
@@ -1628,9 +1615,6 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
             b.call('DBG_SP')
             b.ret()
         emit_label_printer('DBG_LBL_TOK', 'TOK')
-        emit_label_printer('DBG_LBL_L1', 'L1')
-        emit_label_printer('DBG_LBL_L2', 'L2')
-        emit_label_printer('DBG_LBL_L3', 'L3')
         emit_label_printer('DBG_LBL_OUT', 'OUT')
 
     # === DATA ===
@@ -1662,6 +1646,8 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
     b.label('CURIN');   b.d3(0)
     b.label('PACKED');  b.db(0)
     b.label('WEIGHT');  b.db(0)
+    b.label('LSHIFT');     b.db(0)   # per-layer right-shift, set by each stub
+    b.label('LSHIFT_CNT'); b.db(0)   # working counter for the runtime shift loop
     b.label('ACC');     b.d3(0)
     b.label('MAXL');    b.db(0)
     b.label('MAXH');    b.db(0)
@@ -1684,16 +1670,15 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
     b.label('SAVED_IY'); b.d3(0)
     b.label('INPBUF'); b.ds(62)
 
-    # Computation buffers
+    # Computation buffers (ping-pong; each holds the widest layer's output).
+    # Split layers write contiguous slices of their output buffer.
     b.label('TOKBUF'); b.ds(input_size * 2)
-    max_hidden = 512
-    b.label('BUF_A'); b.ds(max_hidden * 2)
-    b.label('BUF_B'); b.ds(256 * 2)
-    b.label('BUF_B_MID'); b.ds(256 * 2)
+    b.label('PING'); b.ds(max_hidden * 2)
+    b.label('PONG'); b.ds(max_hidden * 2)
     b.label('OUTBUF'); b.ds(output_size * 2)
 
     # AppVar data pointers
-    for i in range(len(APPVAR_NAMES)):
+    for i in range(len(av_names)):
         b.label(f'AVPTR{i}'); b.d3(0)
 
     # Scratch for the RAM-vs-archived pointer test: a 3-byte slot whose high
@@ -1702,14 +1687,14 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
     b.label('AVTMP_HI'); b.db(0)
 
     # AppVar name data
-    for i, name in enumerate(APPVAR_NAMES):
+    for i, name in enumerate(av_names):
         b.label(f'AVNAME{i}')
         b.db(APPVAR_TYPE)
         for c in name.ljust(8, '\x00'):
             b.db(ord(c))
 
     # Archive tracking flags
-    for i in range(len(APPVAR_NAMES)):
+    for i in range(len(av_names)):
         b.label(f'AVARCED{i}'); b.db(0)
 
     # Debug-only scratch (emitted only when debug=True so production output is
@@ -1745,11 +1730,8 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
         'output_size': output_size,
         'num_chars': num_chars,
         'dual_bias_threshold': dual_bias_threshold,
-        'appvar_names': list(APPVAR_NAMES),
-        'layer_calls': ['LAYER1', 'RELU1', 'LAYER2A', 'LAYER2B', 'RELU2',
-                        'LAYER3', 'RELU3'],
-        'output_start': 'LAYER4_START',
-        'output_rest': 'LAYER4_REST',
+        'appvar_names': av_names,
+        'forward': 'FORWARD',     # one entry point: reads GENPOS, writes OUTBUF
         'argmax': 'ARGMAX',
     }
 
@@ -1793,9 +1775,9 @@ if __name__ == '__main__':
 
     # Show key addresses
     print("\nKey addresses:")
-    for name in ['START', 'GENERATE', 'LAYER', 'MULADD', 'ARGMAX', 'TOKENIZE',
-                 'UPDATE_CTX', 'ENCODE_CTX', 'CLEAR_CTX',
-                 'CHARTBL', 'TOKBUF', 'OUTBUF', 'BUF_A', 'BUF_B']:
+    for name in ['START', 'GENERATE', 'FORWARD', 'LAYER', 'MULADD', 'ARGMAX',
+                 'TOKENIZE', 'UPDATE_CTX', 'ENCODE_CTX', 'CLEAR_CTX',
+                 'CHARTBL', 'TOKBUF', 'OUTBUF', 'PING', 'PONG']:
         if name in b.labels:
             print(f"  {name}: {b.labels[name]:06X}h")
 

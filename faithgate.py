@@ -75,11 +75,7 @@ def run_emitted(b, blobs, params, spec, query, context, genpos):
 
     cpu.w8(L['GENPOS'], genpos)
 
-    for lbl in meta['layer_calls']:
-        cpu.run(L[lbl])
-    out_lbl = (meta['output_start'] if genpos < meta['dual_bias_threshold']
-               else meta['output_rest'])
-    cpu.run(L[out_lbl])
+    cpu.run(L[meta['forward']])      # FORWARD reads GENPOS and writes OUTBUF
     cpu.run(L[meta['argmax']])
 
     n = meta['output_size']

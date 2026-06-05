@@ -40,10 +40,13 @@ DEFAULT_SPEC = {
     "num_classes": EXPECTED_NUM_CLASSES,     # validated == len(CHARSET)
     "activation": "relu",                    # enum: relu (others need kernel+codegen)
 
-    # --- per-layer integer path (length == len(hidden_sizes)+1, output last) ---
-    "weight_bits": [2, 2, 2, 2],             # 2-bit today; mixed precision allowed
+    # --- per-layer integer path ---
+    # weight_bits / inter_layer_shift may be a scalar (broadcast to every layer)
+    # or an explicit per-layer list of length len(hidden_sizes)+1 (output last).
+    # Scalars are the default so changing hidden_sizes "just works".
+    "weight_bits": 2,                        # 2-bit today; mixed precision allowed
     "weight_quantile": 0.85,                 # per-layer scale = this pctile of |W|
-    "inter_layer_shift": [2, 2, 2, 2],       # right-shift after each layer (÷4 == 2)
+    "inter_layer_shift": 2,                  # right-shift after each layer (÷4 == 2)
     "activation_scale": 32,                  # fixed-point input scale
     "rounding": "trunc",                     # 'trunc' (sim today) | 'floor' (device)
     "accum_bits": 24,                        # eZ80 native accumulator width
