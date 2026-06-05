@@ -363,17 +363,20 @@ def train(epochs=300, lr=0.002, save_best=False, batch_size=8192, quant_target_e
     # Encoding is a DOF: thread the spec's n-gram orders + hash params so training
     # matches intkernel/the build exactly (avoids the train-vs-build skew that hit
     # when only num_buckets/context_len were spec-driven).
+    _signed = SPEC.get('signed_hash', False)
     query_encoder = TrigramEncoder(num_buckets=SPEC['query_buckets'],
                                    ngram_orders=SPEC['query_ngram_orders'],
                                    hash_mult=SPEC['query_hash']['mult'],
                                    hash_mask=SPEC['query_hash']['mask'],
-                                   pos_offset_mult=SPEC['query_hash']['pos_offset_mult'])
+                                   pos_offset_mult=SPEC['query_hash']['pos_offset_mult'],
+                                   signed_hash=_signed)
     context_encoder = ContextEncoder(num_buckets=SPEC['context_buckets'],
                                      context_len=SPEC['context_len'],
                                      ngram_orders=SPEC['context_ngram_orders'],
                                      hash_mult=SPEC['context_hash']['mult'],
                                      hash_mask=SPEC['context_hash']['mask'],
-                                     pos_offset_mult=SPEC['context_hash']['pos_offset_mult'])
+                                     pos_offset_mult=SPEC['context_hash']['pos_offset_mult'],
+                                     signed_hash=_signed)
 
     # Generate all character-level examples upfront (CPU)
     print("Generating character examples...")

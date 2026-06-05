@@ -319,6 +319,8 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
     assert ctx_orders == list(range(1, ctx_max_order + 1)), \
         "emitted tokenizer supports contiguous context n-gram orders 1..N only"
     assert spec['query_ngram_orders'] == [3], "emitted tokenizer is trigram-query only"
+    assert not spec.get('signed_hash', False), \
+        "signed count-sketch hashing not yet in eZ80 codegen (sim-probe only for now)"
     assert len(shifts) == num_layers, (len(shifts), num_layers)
     assert len(wbits) == num_layers, (len(wbits), num_layers)
     MAX_AV = sizes.MAX_APPVAR_BYTES

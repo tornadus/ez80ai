@@ -24,12 +24,13 @@ class TrigramEncoder:
 
     def __init__(self, num_buckets: int = 128, ngram_orders=(3,),
                  hash_mult: int = 31, hash_mask: int = 0xFFFF,
-                 pos_offset_mult: int = 0):
+                 pos_offset_mult: int = 0, signed_hash: bool = False):
         self.num_buckets = num_buckets
         self.ngram_orders = tuple(ngram_orders)
         self.hash_mult = hash_mult
         self.hash_mask = hash_mask
         self.pos_offset_mult = pos_offset_mult
+        self.signed_hash = signed_hash
 
     def _hash_ngram(self, ngram: str, pos: int) -> int:
         h = pos & self.hash_mask
@@ -38,14 +39,17 @@ class TrigramEncoder:
         return h
 
     def encode(self, text: str) -> np.ndarray:
-        """Encode text into bucket counts (raw counts)."""
+        """Encode text into bucket counts (raw counts, or signed count-sketch)."""
         vec = np.zeros(self.num_buckets, dtype=np.float32)
         text = ' ' + text.lower() + ' '  # 1-space pad both ends (boundary n-grams)
         for n in self.ngram_orders:
             for i in range(len(text) - n + 1):
                 pos = (i * self.pos_offset_mult) & self.hash_mask
                 h = self._hash_ngram(text[i:i + n], pos)
-                vec[h & (self.num_buckets - 1)] += 1.0
+                # signed count-sketch: a high hash bit gives a ±1 sign so colliding
+                # n-grams cancel in expectation instead of piling up bias.
+                inc = -1.0 if (self.signed_hash and (h & 0x8000)) else 1.0
+                vec[h & (self.num_buckets - 1)] += inc
         return vec
 
 
@@ -59,13 +63,15 @@ class ContextEncoder:
 
     def __init__(self, num_buckets: int = 128, context_len: int = 8,
                  ngram_orders=(1, 2, 3), hash_mult: int = 31,
-                 hash_mask: int = 0xFFFF, pos_offset_mult: int = 7):
+                 hash_mask: int = 0xFFFF, pos_offset_mult: int = 7,
+                 signed_hash: bool = False):
         self.num_buckets = num_buckets
         self.context_len = context_len
         self.ngram_orders = tuple(ngram_orders)
         self.hash_mult = hash_mult
         self.hash_mask = hash_mask
         self.pos_offset_mult = pos_offset_mult
+        self.signed_hash = signed_hash
 
     def _hash_ngram(self, ngram: str, pos: int) -> int:
         h = pos & self.hash_mask
@@ -74,14 +80,15 @@ class ContextEncoder:
         return h
 
     def encode(self, recent_chars: str) -> np.ndarray:
-        """Encode recent output characters (raw counts)."""
+        """Encode recent output characters (raw counts, or signed count-sketch)."""
         vec = np.zeros(self.num_buckets, dtype=np.float32)
         recent = recent_chars[-self.context_len:].lower().rjust(self.context_len)
         for n in self.ngram_orders:
             for i in range(len(recent) - n + 1):
                 pos = (i * self.pos_offset_mult) & self.hash_mask
                 h = self._hash_ngram(recent[i:i + n], pos)
-                vec[h & (self.num_buckets - 1)] += 1.0
+                inc = -1.0 if (self.signed_hash and (h & 0x8000)) else 1.0
+                vec[h & (self.num_buckets - 1)] += inc
         return vec
 
 

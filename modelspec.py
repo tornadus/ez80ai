@@ -64,6 +64,7 @@ DEFAULT_SPEC = {
     "context_ngram_orders": [1, 2, 3],
     "query_hash": {"mult": 31, "mask": 0xFFFF, "pos_offset_mult": 0},
     "context_hash": {"mult": 31, "mask": 0xFFFF, "pos_offset_mult": 7},
+    "signed_hash": False,                    # signed count-sketch (±1 per n-gram)
 
     # --- training hyperparameters ---
     "lr": 0.002,

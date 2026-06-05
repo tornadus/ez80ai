@@ -110,17 +110,20 @@ def measure_intacc(model_path, device, n_samples=8000):
     # hardcoded 128/128/8. The teacher-forced example construction stays here
     # (grader-controlled), so the next-char label can never leak into the input.
     spec = load_spec_from_model(model_path)
+    _signed = spec.get('signed_hash', False)
     qe = TrigramEncoder(num_buckets=spec['query_buckets'],
                         ngram_orders=spec['query_ngram_orders'],
                         hash_mult=spec['query_hash']['mult'],
                         hash_mask=spec['query_hash']['mask'],
-                        pos_offset_mult=spec['query_hash']['pos_offset_mult'])
+                        pos_offset_mult=spec['query_hash']['pos_offset_mult'],
+                        signed_hash=_signed)
     ce = ContextEncoder(num_buckets=spec['context_buckets'],
                         context_len=spec['context_len'],
                         ngram_orders=spec['context_ngram_orders'],
                         hash_mult=spec['context_hash']['mult'],
                         hash_mask=spec['context_hash']['mask'],
-                        pos_offset_mult=spec['context_hash']['pos_offset_mult'])
+                        pos_offset_mult=spec['context_hash']['pos_offset_mult'],
+                        signed_hash=_signed)
 
     examples = []
     for q, r in pairs:
