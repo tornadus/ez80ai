@@ -67,13 +67,13 @@ DEFAULT_SPEC = {
 
     # --- training hyperparameters ---
     "lr": 0.002,
-    "batch_size": 8192,
+    "batch_size": 4096,
     "epochs": 300,
     "weight_decay": 1e-4,                    # LOAD-BEARING for quantization (do not 0)
     "optimizer": "adam",
     "quant_loss_weight": 0.25,
     "qt_start": 0.3,
-    "qt_ramp_factor": 0.4,                   # QT reaches 1.0 by qt_ramp_factor*horizon
+    "qt_ramp_factor": 0.3,                   # QT reaches 1.0 by qt_ramp_factor*horizon
     "lr_schedule": "cosine",
     "eta_min_frac": 0.02,
 
