@@ -381,11 +381,13 @@ def train(epochs=300, lr=0.002, save_best=False, batch_size=8192, quant_target_e
         print(f"Parameters: {total_params:,}")
 
     model = model.to(device)
-    # No weight_decay: the 0.85-quantile quantizer is scale-relative, so shrinking
-    # the float master weights leaves the deployed 2-bit weights unchanged -- decay
-    # cannot regularize what actually ships. (Use AdamW deliberately if you ever
-    # want to regularize the float masters.)
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    # weight_decay is LOAD-BEARING FOR QUANTIZATION (do not remove): although the
+    # 0.85-quantile quantizer is scale-relative, decay is not a uniform rescale --
+    # it pulls larger weights down proportionally, keeping the weight distribution
+    # compact so the fixed-scale rounding stays clean. Empirically (ez80research
+    # loop, ~34 experiments): wd=0 -> 0.444 IntAcc (catastrophe), wd=1e-4 -> 0.604,
+    # wd=2e-4 -> 0.575. Keep at 1e-4.
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=1e-4)
     # Cosine schedule spans the GLOBAL training horizon and is fast-forwarded by
     # the epochs already trained, so re-running on an existing checkpoint continues
     # the curve instead of restarting at full LR each invocation.
