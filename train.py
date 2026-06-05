@@ -429,8 +429,16 @@ def train(epochs=300, lr=0.002, save_best=False, batch_size=8192, quant_target_e
     # the epochs already trained, so re-running on an existing checkpoint continues
     # the curve instead of restarting at full LR each invocation.
     horizon = max(quant_target_epoch, total_epochs + epochs)
-    scheduler = torch.optim.lr_scheduler.PolynomialLR(
-        optimizer, total_iters=horizon, power=2.0)  # polynomial decay (experiment) vs cosine
+    # Plateau-then-decay (experiment): hold peak LR through the float-learning phase
+    # (until QT reaches 1.0), then polynomial-decay through the quant phase, which
+    # wants low LR. The quant phase (not the peak) is what's LR-sensitive.
+    _quant_full = max(1.0, quant_target_epoch * SPEC['qt_ramp_factor'])
+    def _lr_lambda(epoch):
+        if epoch < _quant_full:
+            return 1.0
+        prog = min(1.0, (epoch - _quant_full) / max(1.0, horizon - _quant_full))
+        return (1.0 - prog) ** 2
+    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, _lr_lambda)
     # Compute budget (P6): in 'grad_steps' mode, stop after a fixed number of
     # optimizer steps regardless of wall-clock, so a slower-but-better arch gets
     # the SAME amount of training as a fast one (fair comparison). 'wall_s' keeps
