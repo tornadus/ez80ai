@@ -26,7 +26,7 @@ import numpy as np
 import struct
 
 from libez80 import eZ80Builder
-from loadmodel import load_model_params
+from loadmodel import load_model_params, load_dual_bias_threshold
 
 # Ti-84 Plus CE TI-OS routine addresses
 TI_ClrScrn = 0x020814       # Clear home screen
@@ -102,7 +102,16 @@ SK_2ND = 0x36
 SK_MODE = 0x37
 SK_DEL = 0x38
 
-# Scan code -> ASCII mapping table (same as snarkchat: letters + space + punctuation)
+# Scan code -> ASCII mapping table (letters + space + a little punctuation).
+#
+# NOTE on the charset asymmetry (deliberate): the model's OUTPUT charset includes
+# digits 0-9, comma and dash so it can answer things like "WHEN WAS ..." with a
+# number — and it does in practice. Those keys are intentionally NOT mapped for
+# INPUT here: a query is only ever hashed into trigram buckets, so what matters is
+# letters/space, and keeping the input keypad simple avoids accidental mode keys.
+# Relatedly, query text is hashed as-is (lower-cased) and is NOT filtered to the
+# output charset — any character a query contains just contributes to a trigram
+# bucket, which is fine and intended.
 _ALPHA_MAP = "\0\0\0\0\0\0\0\0\0\0\"WRMH\0\0?\0VQLG\0\0:ZUPKFC\0 YTOJEB\0\0XSNIDA\0\0\0\0\0\0\0\0"
 SCAN_TO_ASCII = {}
 for i, ch in enumerate(_ALPHA_MAP):
@@ -256,8 +265,12 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
 
     # Check for dual bias
     has_dual_bias = 'fc4_bias_start' in params
+    # Position threshold the model was trained with (sim's DUAL_BIAS_THRESHOLD).
+    # Driven from the model file so the device branch can never silently disagree
+    # with the sim if the threshold is ever changed.
+    dual_bias_threshold = load_dual_bias_threshold(model_path)
     if has_dual_bias:
-        print(f"Dual bias: fc4_bias (rest) + fc4_bias_start (first 3 chars)")
+        print(f"Dual bias: fc4_bias (rest) + fc4_bias_start (first {dual_bias_threshold} chars)")
     else:
         print("WARNING: No dual bias found in model")
 
@@ -525,10 +538,12 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
     b.or_a()
     b.jr_z('RI_LOOP')
 
-    # Check if buffer full
+    # Check if buffer full. Cap at 60 to match the Python side, which truncates
+    # queries to 60 chars (encoding.parse_pair / prepare_data.normalize_query);
+    # accepting more on-calc would tokenize long queries differently than trained.
     b.ld_b_a()
     b.ld_a_mem_label('INPLEN')
-    b.cp_n(62)
+    b.cp_n(60)
     b.jr_nc('RI_LOOP')
 
     # Store character
@@ -592,6 +607,29 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
     b.ld_mem_label_a('INPLEN')
 
     b.label('RI_DONE')
+    # Strip TRAILING spaces so the device sees query.strip() exactly like the sim
+    # (train.py/chat.py/test_model.py all .strip() the query before encoding, and
+    # TOKENIZE already skips LEADING spaces). Without this, a typed trailing space
+    # produces a different trigram vector and a different on-calc answer (~16% of
+    # queries). An all-spaces query collapses to INPLEN=0 here and is skipped by
+    # CHAT, matching Python's empty-after-strip behaviour.
+    b.label('RI_STRIP')
+    b.ld_a_mem_label('INPLEN')
+    b.or_a()
+    b.jr_z('RI_STRIP_DONE')        # empty -> nothing to trim
+    b.dec_a()                       # A = index of last char
+    b.ld_hl_label('INPBUF')
+    b.ld_bc_nn(0)
+    b.ld_c_a()
+    b.add_hl_bc()                   # HL -> INPBUF[last]
+    b.ld_a_hl()
+    b.cp_n(ord(' '))
+    b.jr_nz('RI_STRIP_DONE')       # last char not a space -> done
+    b.ld_a_mem_label('INPLEN')
+    b.dec_a()
+    b.ld_mem_label_a('INPLEN')
+    b.jr('RI_STRIP')
+    b.label('RI_STRIP_DONE')
     b.call_addr(TI_NewLine)
     b.ret()
 
@@ -615,11 +653,11 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
     b.call('LAYER3')     # 512->256, output to BUF_A
     b.call('RELU3')      # ReLU BUF_A (256 values)
 
-    # Select LAYER4 variant based on GENPOS
+    # Select LAYER4 variant based on GENPOS (threshold from the model file)
     b.ld_a_mem_label('GENPOS')
-    b.cp_n(3)
+    b.cp_n(dual_bias_threshold)
     b.jr_nc('GEN_L4_REST')
-    b.call('LAYER4_START')   # first 3 chars: use start bias
+    b.call('LAYER4_START')   # first DUAL_BIAS_THRESHOLD chars: use start bias
     b.jr('GEN_L4_DONE')
     b.label('GEN_L4_REST')
     b.call('LAYER4_REST')    # subsequent: use rest bias
@@ -1045,10 +1083,18 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
     b.label('MA_NEG')
     b.cp_n(0xFF)
     b.jr_z('MA_N1')
-    # weight == -2: ACC -= 2*DE
+    # weight == -2: ACC -= 2*DE. Each SBC HL,DE subtracts DE *and the carry*, so
+    # the carry MUST be cleared before BOTH subtractions. Without the second
+    # `or a` the first SBC's borrow leaks into the second, computing
+    # ACC - 2*DE - borrow and silently diverging from the sim (train._forward_int
+    # does an exact -2*DE). This is an assembly-level bug, so the host
+    # test_faithfulness.py (which models the device CONTRACT, not the literal
+    # bytes) does NOT catch it -- verify on hardware via the --debug per-layer
+    # checksum build if you touch MA_NEG.
     b.ld_hl_mem_label('ACC')
     b.or_a()
     b.sbc_hl_de()
+    b.or_a()
     b.sbc_hl_de()
     b.ld_mem_label_hl('ACC')
     b.ret()
@@ -1099,21 +1145,22 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
     b.jp_nz('RELU')
     b.ret()
 
-    # === ARGMAX with second-best tracking ===
+    # === ARGMAX (plain argmax over logits, first-max tie-break) ===
+    # Mirrors torch.argmax: scans low->high index, only a STRICTLY greater logit
+    # replaces the best, so ties keep the lowest index. (Previously also tracked a
+    # second-best in SECL/SECH/SECI for a heuristic that was removed; that dead
+    # bookkeeping is gone — the best-comparison logic below is unchanged.)
     b.label('ARGMAX')
     b.ld_hl_label('OUTBUF')
-    # Load first value as initial best AND second
+    # Load first value as initial best
     b.ld_a_hl()
     b.ld_mem_label_a('MAXL')
-    b.ld_mem_label_a('SECL')
     b.inc_hl()
     b.ld_a_hl()
     b.ld_mem_label_a('MAXH')
-    b.ld_mem_label_a('SECH')
     b.inc_hl()
     b.xor_a()
     b.ld_mem_label_a('MAXI')
-    b.ld_mem_label_a('SECI')
     b.ld_b_n(num_chars - 1)    # 42 remaining candidates
     b.ld_c_n(1)                 # current index
 
@@ -1125,7 +1172,7 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
     b.push_hl()
     b.push_bc()
 
-    # Signed 16-bit compare: is D:E > MAXH:MAXL?
+    # Signed 16-bit compare: is D:E > MAXH:MAXL? (strictly greater -> new best)
     b.ld_a_d()
     b.ld_hl_label('MAXH')
     b.xor_hl()                # XOR (HL)
@@ -1134,28 +1181,20 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
     # Same sign: unsigned compare
     b.ld_a_d()
     b.cp_hl()
-    b.jr_c('AM_CHK_SEC')      # candidate < best -> check second
+    b.jr_c('AM_SKIP')        # candidate < best -> skip
     b.jr_nz('AM_NEW_BEST')    # candidate > best -> new best
     b.ld_hl_label('MAXL')
     b.ld_a_e()
     b.cp_hl()
-    b.jr_c('AM_CHK_SEC')
-    b.jr_z('AM_CHK_SEC')
+    b.jr_c('AM_SKIP')
+    b.jr_z('AM_SKIP')        # equal -> keep first (not strictly greater)
     b.jr('AM_NEW_BEST')
 
     b.label('AM_DSIGN')
     b.bit_7_d()
-    b.jr_nz('AM_CHK_SEC')     # Candidate negative -> check second
+    b.jr_nz('AM_SKIP')       # candidate negative, best positive -> skip
 
     b.label('AM_NEW_BEST')
-    # Old best becomes second best
-    b.ld_a_mem_label('MAXL')
-    b.ld_mem_label_a('SECL')
-    b.ld_a_mem_label('MAXH')
-    b.ld_mem_label_a('SECH')
-    b.ld_a_mem_label('MAXI')
-    b.ld_mem_label_a('SECI')
-    # New best
     b.ld_a_e()
     b.ld_mem_label_a('MAXL')
     b.ld_a_d()
@@ -1163,43 +1202,6 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
     b.pop_bc()
     b.ld_a_c()
     b.ld_mem_label_a('MAXI')
-    b.pop_hl()
-    b.inc_c()
-    b.dec_b()
-    b.jp_nz('AMLP')
-    b.jp('AM_DONE')
-
-    # Check if candidate > second best
-    b.label('AM_CHK_SEC')
-    # Signed 16-bit compare: is D:E > SECH:SECL?
-    b.ld_a_d()
-    b.ld_hl_label('SECH')
-    b.xor_hl()                # XOR (HL)
-    b.jp_m('AM_DSIGN2')
-
-    b.ld_a_d()
-    b.cp_hl()
-    b.jr_c('AM_SKIP')
-    b.jr_nz('AM_NEW_SEC')
-    b.ld_hl_label('SECL')
-    b.ld_a_e()
-    b.cp_hl()
-    b.jr_c('AM_SKIP')
-    b.jr_z('AM_SKIP')
-    b.jr('AM_NEW_SEC')
-
-    b.label('AM_DSIGN2')
-    b.bit_7_d()
-    b.jr_nz('AM_SKIP')
-
-    b.label('AM_NEW_SEC')
-    b.ld_a_e()
-    b.ld_mem_label_a('SECL')
-    b.ld_a_d()
-    b.ld_mem_label_a('SECH')
-    b.pop_bc()
-    b.ld_a_c()
-    b.ld_mem_label_a('SECI')
     b.pop_hl()
     b.inc_c()
     b.dec_b()
@@ -1664,9 +1666,6 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
     b.label('MAXL');    b.db(0)
     b.label('MAXH');    b.db(0)
     b.label('MAXI');    b.db(0)
-    b.label('SECL');    b.db(0)       # Second-best low byte
-    b.label('SECH');    b.db(0)       # Second-best high byte
-    b.label('SECI');    b.db(0)       # Second-best index
     b.label('RESULT');  b.db(0)
     b.label('GENCNT');  b.db(0)
     b.label('GENPOS');  b.db(0)       # Generation position (0-based, for dual bias)
@@ -1784,28 +1783,24 @@ if __name__ == '__main__':
     # Resolve labels and get raw code
     b.resolve()
 
-    # Package program as .8xp
-    xp_data = build_8xp(b.code, prog_name)
-    with open(args.output, 'wb') as f:
-        f.write(xp_data)
-
     print(f"\nProgram: {len(b.code)} bytes ({len(b.code)/1024:.1f} KB)")
 
-    # Report AppVar sizes (no files written yet).
+    # Report AppVar sizes.
     total_av = sum(len(d) for d in appvar_blobs.values())
     for av_name, av_data in appvar_blobs.items():
         print(f"AppVar {av_name}: {len(av_data):,} bytes")
     print(f"\nTotal weight data: {total_av:,} bytes ({total_av/1024:.1f} KB)")
 
     # Hard gate: refuse to ship a model that won't fit the calculator's RAM.
-    # Runs BEFORE writing any .8xv so an over-budget model fails loudly and
-    # cleanly (BudgetError) instead of crashing inside build_8xv on the uint16
-    # AppVar-size limit.
+    # Runs BEFORE writing ANY output file so an over-budget model fails loudly and
+    # cleanly (BudgetError) without leaving a half-written .8xp/.8xv behind. The
+    # working buffers (TOKBUF/BUF_A/...) are emitted into the program image via
+    # ds(), so len(b.code) already includes them — total_ram() must not add them
+    # again.
     import sizes as _sizes
     _ram = _sizes.total_ram(len(b.code), total_av)
     print(f"Runtime RAM: ~{_ram/1024:.1f} KB "
-          f"(program {len(b.code)/1024:.1f} + weights {total_av/1024:.1f} "
-          f"+ buffers {_sizes.RUNTIME_BUFFER_BYTES/1024:.1f}); "
+          f"(program incl. buffers {len(b.code)/1024:.1f} + weights {total_av/1024:.1f}); "
           f"budget {_sizes.RAM_BUDGET_BYTES/1024:.0f} KB")
     _sizes.validate_or_raise({
         'program': len(b.code),
@@ -1813,10 +1808,16 @@ if __name__ == '__main__':
         'total_weight': total_av,
     })
 
-    # Within budget: write the AppVar files. The DEBUG build reuses the SAME
-    # weight AppVars as production (NEOA-D), so we skip re-writing the .8xv files
-    # to avoid touching production artifacts.
+    # Within budget: create the output dir and write the program .8xp.
     output_dir = os.path.dirname(args.output) or '.'
+    os.makedirs(output_dir, exist_ok=True)
+    xp_data = build_8xp(b.code, prog_name)
+    with open(args.output, 'wb') as f:
+        f.write(xp_data)
+
+    # Write the AppVar files. The DEBUG build reuses the SAME weight AppVars as
+    # production (NEOA-D), so we skip re-writing the .8xv files to avoid touching
+    # production artifacts.
     if not args.debug:
         for av_name, av_data in appvar_blobs.items():
             xv_data = build_8xv(av_data, av_name)

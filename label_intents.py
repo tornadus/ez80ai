@@ -4,7 +4,8 @@ Interactive tool to assign responses to each intent category.
 
 Reads Small_talk_Intent.en.csv, groups by intent, and for each category
 shows the example inputs and prompts for a response. Outputs pipe-separated
-training data compatible with feedme.py / train.py.
+training data compatible with encoding.py / train.py (the "QUERY|RESPONSE"
+format consumed by prepare_data.load_personality and encoding.parse_pair).
 
 Usage:
     python3 label_intents.py
@@ -86,61 +87,61 @@ def main():
     print("  !b       = go back to previous category")
     print()
 
-    # Open output file in append mode
-    out = open(args.output, 'a', encoding='utf-8')
-    labeled_this_session = []
+    # Buffer labels in memory (intent -> response, in labeling order) and write
+    # them all once on exit. The old design appended+flushed per category, so '!b'
+    # could not actually undo an already-written line; buffering lets '!b' clear
+    # the previous label cleanly. Trade-off: a hard kill (not Ctrl-C, which is
+    # caught) loses this session's unsaved labels.
+    responses = {}
     i = 0
+    try:
+        while i < len(remaining):
+            intent, examples = remaining[i]
 
-    while i < len(remaining):
-        intent, examples = remaining[i]
+            print(f"\033[1m[{done + i + 1}/{total}] {intent}\033[0m")
+            print(f"  {len(examples)} example inputs:")
+            for ex in examples:
+                print(f"    \033[36m{ex}\033[0m")
+            print()
 
-        print(f"\033[1m[{done + i + 1}/{total}] {intent}\033[0m")
-        print(f"  {len(examples)} example inputs:")
-        for ex in examples:
-            print(f"    \033[36m{ex}\033[0m")
-        print()
+            try:
+                response = input("  Response: ").strip()
+            except (EOFError, KeyboardInterrupt):
+                print("\nSaving and exiting.")
+                break
 
-        try:
-            response = input("  Response: ").strip()
-        except (EOFError, KeyboardInterrupt):
-            print("\nSaving and exiting.")
-            break
+            if response == '!q':
+                print("Saving and exiting.")
+                break
 
-        if response == '!q':
-            print("Saving and exiting.")
-            break
+            if response == '!b':
+                if i > 0:
+                    i -= 1
+                    responses.pop(remaining[i][0], None)  # truly undo previous label
+                    print(f"  (going back — previous label cleared)\n")
+                else:
+                    print("  (nothing to go back to)\n")
+                continue
 
-        if response == '!b':
-            if labeled_this_session:
-                # Undo last — we can't un-write the file easily,
-                # but we can let the user re-enter
-                i -= 1
-                print(f"  (going back to previous category)\n")
-            else:
-                print("  (nothing to go back to)\n")
-            continue
+            if not response:
+                responses.pop(intent, None)  # clear if revisiting a category
+                print("  (skipped)\n")
+                i += 1
+                continue
 
-        if not response:
-            print("  (skipped)\n")
+            responses[intent] = response
+            print(f"  \033[32m✓ Recorded response for {len(examples)} inputs\033[0m\n")
             i += 1
-            continue
-
-        # Write all examples with this response
-        for ex in examples:
-            line = f"{ex}|{response}"
-            out.write(line + '\n')
-        out.flush()
-
-        labeled_this_session.append((intent, response))
-        print(f"  \033[32m✓ Wrote {len(examples)} pairs\033[0m\n")
-        i += 1
-
-    out.close()
-
-    total_written = sum(len(intents[intent]) for intent, _ in labeled_this_session)
-    print(f"\nDone! Wrote {total_written} training pairs to {args.output}")
-    if i < len(remaining):
-        print(f"Run with --resume to continue where you left off.")
+    finally:
+        with open(args.output, 'a', encoding='utf-8') as out:
+            written = 0
+            for intent, response in responses.items():
+                for ex in intents[intent]:
+                    out.write(f"{ex}|{response}\n")
+                    written += 1
+        print(f"\nDone! Wrote {written} training pairs to {args.output}")
+        if i < len(remaining):
+            print(f"Run with --resume to continue where you left off.")
 
 
 if __name__ == '__main__':

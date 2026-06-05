@@ -171,7 +171,11 @@ def main():
     print("\n--- Personality ---")
     personality_pairs = load_personality(LABELED_DATA)
 
-    # Oversample personality
+    # Oversample personality. This is DELIBERATE: the personality pairs are the
+    # chatbot's "character" and we want the tiny model to recall them strongly, so
+    # they are intentionally over-represented (with the default 10x they become a
+    # large share of the corpus). The model is therefore part-recall, part-QA by
+    # design — turn --personality-mult down to weight general QA more heavily.
     personality_expanded = personality_pairs * args.personality_mult
     print(f"  After {args.personality_mult}x oversampling: {len(personality_expanded):,}")
 

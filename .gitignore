@@ -14,6 +14,9 @@ training_data.txt
 bin/*.8xp
 bin/*.8xv
 
+# Release archives
+*.zip
+
 # ez80research experiment logs (keep commits source-only)
 ez80research/results.tsv
 ez80research/results.tsv.lock

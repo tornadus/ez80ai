@@ -1,3 +1,11 @@
-numpy
-torch
-datasets
+# Inference + build (buildchat84.py / exportmodel.py from a .npz) need only NumPy.
+numpy>=1.24
+
+# Training and GPU-accelerated chat/eval (train.py, chat.py, test_model.py).
+# For Intel Arc install the XPU build of torch (e.g. torch==2.11.0+xpu from the
+# Intel extension / PyTorch index); plain CPU and CUDA builds also work. Pin the
+# exact build you train with if you need bit-reproducible runs.
+torch>=2.1
+
+# Data preparation only: prepare_data.py downloads nq_open from the HuggingFace Hub.
+datasets>=2.14

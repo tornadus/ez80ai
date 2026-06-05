@@ -38,10 +38,30 @@ def _load_npz(model_path: str) -> tuple[dict, dict, str]:
     return params, arch, charset
 
 
+def load_dual_bias_threshold(model_path: str, default: int = 3) -> int:
+    """Return the dual-bias position threshold the model was trained with.
+
+    The device must branch on the SAME threshold the sim used (train.py's
+    DUAL_BIAS_THRESHOLD), otherwise on-calc generation silently diverges. The
+    value is recorded by exportmodel.py (.npz '_dual_bias_threshold') and by
+    train.py (.pt 'dual_bias_threshold'); falls back to `default` if absent.
+    """
+    if model_path.endswith('.npz'):
+        data = np.load(model_path)
+        if '_dual_bias_threshold' in data.files:
+            return int(data['_dual_bias_threshold'])
+        return default
+    elif model_path.endswith('.pt'):
+        import torch
+        cp = torch.load(model_path, weights_only=False, map_location='cpu')
+        return int(cp.get('dual_bias_threshold', default))
+    return default
+
+
 def _load_pt(model_path: str) -> tuple[dict, dict, str]:
     """Load from PyTorch checkpoint format."""
     import torch
-    from train import NeochatModel
+    from train import NeochatModel, filter_legacy_state
 
     checkpoint = torch.load(model_path, weights_only=False, map_location='cpu')
     arch = checkpoint['architecture']
@@ -52,7 +72,7 @@ def _load_pt(model_path: str) -> tuple[dict, dict, str]:
         hidden_sizes=arch['hidden_sizes'],
         num_chars=arch['num_classes'],
     )
-    model.load_state_dict(checkpoint['model_state'])
+    model.load_state_dict(filter_legacy_state(checkpoint['model_state']))
     model.eval()
 
     params = model.get_quantized_params()

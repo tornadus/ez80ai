@@ -16,7 +16,7 @@ import torch
 from train import (
     NeochatModel, ACTIVATION_SCALE, DUAL_BIAS_THRESHOLD,
     CHARSET, EOS_IDX, IDX_TO_CHAR, NUM_CHARS,
-    generate_response,
+    generate_response, filter_legacy_state,
 )
 from encoding import TrigramEncoder, ContextEncoder
 
@@ -48,7 +48,7 @@ def main():
     # Load model
     cp = torch.load(args.model, weights_only=False, map_location='cpu')
     model = NeochatModel()
-    model.load_state_dict(cp['model_state'])
+    model.load_state_dict(filter_legacy_state(cp['model_state']))
     model.to(device)
     model.eval()
 

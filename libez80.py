@@ -67,10 +67,6 @@ class eZ80Builder:
         """Emit a 24-bit value (little-endian)."""
         self.emit(val & 0xFF, (val >> 8) & 0xFF, (val >> 16) & 0xFF)
 
-    def align(self, boundary: int):
-        overage = self.addr() % boundary
-        if overage < boundary: self.ds(boundary - overage)
-
     # === Fixups ===
 
     def fixup_word(self, label: str):

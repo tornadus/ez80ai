@@ -22,6 +22,24 @@ If your calculator is on OS 5.5 or later, you'll need to jailbreak it before run
 > When you (gracefully) close it, re-archiving will be attempted. If your flash is low, you may get a prompt asking for "Garbage Collection". **Always say yes**, this is just TI-OS wanting to defragment your flash before archiving the weights again.
 
 
+### Building from source
+A fresh clone is **source only** — the trained weights (`*.pt`, `*.npz`), the
+generated `training_data.txt`, and the `bin/` artifacts are git-ignored, so you
+build them yourself:
+
+```bash
+pip install -r requirements.txt
+python3 prepare_data.py                 # downloads nq_open, writes training_data.txt
+python3 train.py -f training_data.txt --epochs 300 --save-best   # -> neochat_model.pt
+python3 exportmodel.py                   # neochat_model.pt -> model.npz
+python3 buildchat84.py --model model.npz # -> bin/NEOCHAT.8xp + NEOA-D.8xv
+python3 test_model.py                    # sanity checks on the trained model
+python3 test_faithfulness.py             # asserts the eZ80 build mirrors the Python sim
+```
+
+`buildchat84.py` and `exportmodel.py` only need NumPy; training/chat/eval need
+PyTorch (see `requirements.txt` for the Intel Arc / XPU note).
+
 ### What to Expect
 A charming little chatbot that gives surprisingly coherent (but factually incorrect) responses.
 

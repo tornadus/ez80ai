@@ -69,60 +69,28 @@ def quantization_friendly_loss(w: torch.Tensor) -> torch.Tensor:
     return distance.mean()
 
 
-def quantize_activations(x: torch.Tensor, scale: int = ACTIVATION_SCALE) -> torch.Tensor:
-    """Quantize activations to simulated fixed-point."""
-    x_scaled = x * scale
-    x_quant = torch.round(x_scaled)
-    return StraightThroughEstimator.apply(x_scaled, x_quant)
-
-
 class OverflowAwareLinear(nn.Module):
-    """
-    Linear layer with 2-bit weight quantization and overflow-aware regularization.
+    """Linear layer with 2-bit weight quantization (STE).
 
-    Uses efficient matmul but adds regularization to prevent overflow:
-    1. Quantize weights to {-2,-1,0,+1} using STE
-    2. Compute worst-case accumulator magnitude
-    3. Penalize if it would exceed 24-bit signed range
+    NOTE: the 24-bit accumulator never gets close to overflowing for the trained
+    models we ship (peak |accum| is ~thousands vs the ~6.7M safe threshold), so
+    the old overflow-penalty / max-accum tracking was a measured no-op (it added
+    exactly 0.0 to the loss) and was removed. The real range guard now lives in
+    test_faithfulness.py, which fails if any activation exceeds the int16 storage
+    the device uses. MAX_ACCUM/MIN_ACCUM remain documented for reference.
     """
 
-    def __init__(self, in_features: int, out_features: int,
-                 simulate_overflow: bool = True,
-                 overflow_penalty: float = 0.0):
+    def __init__(self, in_features: int, out_features: int):
         super().__init__()
         self.in_features = in_features
         self.out_features = out_features
-        self.simulate_overflow = simulate_overflow
 
         self.weight = nn.Parameter(torch.randn(out_features, in_features) * np.sqrt(2.0 / (in_features + out_features)))
         self.bias = nn.Parameter(torch.zeros(out_features))
 
-        self.register_buffer('max_accum_seen', torch.tensor(0.0))
-
     def forward(self, x: torch.Tensor, quant_temp: float = 1.0) -> torch.Tensor:
         w_quant = quantize_weights_2bit(self.weight, hard=True, temperature=quant_temp)
-        out = F.linear(x, w_quant, self.bias)
-
-        if self.training and self.simulate_overflow:
-            with torch.no_grad():
-                w_hard = quantize_weights_2bit(self.weight, hard=False, temperature=1.0)
-                worst_case = (w_hard.abs() @ x.abs().T).max()
-                self.max_accum_seen = max(self.max_accum_seen, worst_case)
-
-        return out
+        return F.linear(x, w_quant, self.bias)
 
     def get_quantization_loss(self) -> torch.Tensor:
         return quantization_friendly_loss(self.weight)
-
-    def get_overflow_risk(self) -> float:
-        return (self.max_accum_seen / MAX_ACCUM).item()
-
-    def compute_overflow_penalty(self, x: torch.Tensor) -> torch.Tensor:
-        w_quant = quantize_weights_2bit(self.weight)
-        accum_estimate = (w_quant.abs() @ x.abs().T)
-        safe_threshold = MAX_ACCUM * 0.8
-        overflow = F.relu(accum_estimate - safe_threshold)
-        return overflow.mean()
-
-    def reset_overflow_stats(self):
-        self.max_accum_seen.zero_()

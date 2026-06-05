@@ -38,7 +38,7 @@ if REPO_ROOT not in sys.path:
 import sizes  # noqa: E402
 from train import (  # noqa: E402
     NeochatModel, CHARSET, INPUT_SIZE, NUM_CHARS,
-    create_training_examples_with_pos,
+    create_training_examples_with_pos, filter_legacy_state,
 )
 from encoding import TrigramEncoder, ContextEncoder, parse_pair  # noqa: E402
 
@@ -53,6 +53,11 @@ TRAINING_DATA = os.path.join(REPO_ROOT, 'training_data.txt')
 # fine. Tolerance is generous because the two numbers use different samples.
 INTACC_INFLATION_TOL = 0.10
 EVAL_SEED = 1234          # fixed seed -> steadier, comparable IntAcc across runs
+# Hard ceiling on the number of (char-level) examples scored, to bound memory.
+# NOTE: each pair expands to ~15 examples, so --samples above ~MAX_EVAL_EXAMPLES/15
+# (~3300) does not enlarge the eval set — it saturates here. Raise this (and your
+# VRAM) if you want --samples beyond that to actually matter.
+MAX_EVAL_EXAMPLES = 50000
 
 
 def get_device():
@@ -100,13 +105,13 @@ def measure_intacc(model_path, device, n_samples=8000):
     examples = []
     for q, r in pairs:
         examples.extend(create_training_examples_with_pos(q, r, qe, ce))
-    if len(examples) > 50000:
+    if len(examples) > MAX_EVAL_EXAMPLES:
         random.shuffle(examples)
-        examples = examples[:50000]
+        examples = examples[:MAX_EVAL_EXAMPLES]
 
     cp = torch.load(model_path, weights_only=False, map_location='cpu')
     model = NeochatModel()
-    model.load_state_dict(cp['model_state'])
+    model.load_state_dict(filter_legacy_state(cp['model_state']))
     model.to(device)
     model.eval()
 
@@ -214,7 +219,9 @@ def main():
     ap.add_argument('--model', default=os.path.join(REPO_ROOT, 'neochat_model.pt'))
     ap.add_argument('--npz', default=os.path.join(REPO_ROOT, 'model.npz'))
     ap.add_argument('--bin-dir', default=os.path.join(REPO_ROOT, 'bin'))
-    ap.add_argument('--samples', type=int, default=8000)
+    ap.add_argument('--samples', type=int, default=8000,
+                    help=f'QA pairs sampled for IntAcc; the expanded example set is '
+                         f'capped at {MAX_EVAL_EXAMPLES} (see MAX_EVAL_EXAMPLES)')
     args = ap.parse_args()
 
     empty_sizes = {'appvars': {}, 'n_appvars': 0}

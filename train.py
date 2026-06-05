@@ -8,7 +8,11 @@ Training script for NEOCHAT — 512->512->256 architecture with dual output bias
 
 Usage:
     python3 train.py -f training_data.txt --epochs 300 --save-best --chat
-    python3 train.py -f training_data.txt --epochs 300 --save-best --resume
+
+Resuming is automatic: if neochat_model.pt exists with a matching architecture it
+is loaded and training continues (pass a high --quant-target so the QT ramp / LR
+schedule keep advancing instead of restarting). Delete the checkpoint to start
+fresh.
 """
 
 import sys
@@ -51,6 +55,13 @@ CHECKPOINT_FILE = os.path.join(os.path.dirname(__file__), 'neochat_model.pt')
 DUAL_BIAS_THRESHOLD = 3
 
 
+def filter_legacy_state(state):
+    """Drop buffers from removed instrumentation (e.g. `*.max_accum_seen`, the old
+    overflow tracker) so checkpoints saved by an earlier train.py still load
+    strictly into the current architecture instead of erroring on unexpected keys."""
+    return {k: v for k, v in state.items() if not k.endswith('max_accum_seen')}
+
+
 def char_to_idx(c):
     return CHAR_TO_IDX.get(c, 0)  # Unknown → space
 
@@ -64,7 +75,7 @@ def idx_to_char(i):
 # ============================================================
 
 def create_training_examples_with_pos(query, response, query_encoder, context_encoder):
-    """Wrap feedme.create_training_examples to add position index.
+    """Wrap encoding.create_training_examples to add position index.
 
     Returns list of (input_vec, target_idx, position) tuples.
     """
@@ -193,29 +204,10 @@ class NeochatModel(nn.Module):
 
         return logits
 
-    def get_overflow_stats(self):
-        stats = {f'layer{i+1}': layer.get_overflow_risk()
-                 for i, layer in enumerate(self.layers)}
-        stats['output'] = self.output_layer.get_overflow_risk()
-        return stats
-
-    def reset_overflow_stats(self):
-        for layer in self.layers:
-            layer.reset_overflow_stats()
-        self.output_layer.reset_overflow_stats()
-
     def compute_quantization_loss(self):
         loss = sum(layer.get_quantization_loss() for layer in self.layers)
         loss += self.output_layer.get_quantization_loss()
         return loss
-
-    def compute_total_overflow_penalty(self, x):
-        penalty = torch.tensor(0.0, device=x.device)
-        for layer in self.layers:
-            penalty = penalty + layer.compute_overflow_penalty(x)
-            x = self.relu(layer(x))
-        penalty = penalty + self.output_layer.compute_overflow_penalty(x)
-        return penalty
 
     def get_quantized_params(self):
         """Extract 2-bit quantized weights and biases for export.
@@ -371,7 +363,7 @@ def train(epochs=300, lr=0.002, save_best=False, batch_size=8192, quant_target_e
         arch = checkpoint.get('architecture', {})
         if arch.get('num_classes') == NUM_CHARS and arch.get('hidden_sizes') == HIDDEN_SIZES:
             model = NeochatModel()
-            model.load_state_dict(checkpoint['model_state'])
+            model.load_state_dict(filter_legacy_state(checkpoint['model_state']))
             total_epochs = checkpoint.get('total_epochs', 0)
             best_int_acc = checkpoint.get('best_int_acc', 0.0)
             best_epoch = checkpoint.get('best_epoch', 0)
@@ -389,8 +381,22 @@ def train(epochs=300, lr=0.002, save_best=False, batch_size=8192, quant_target_e
         print(f"Parameters: {total_params:,}")
 
     model = model.to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=1e-4)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs, eta_min=lr*0.02)
+    # No weight_decay: the 0.85-quantile quantizer is scale-relative, so shrinking
+    # the float master weights leaves the deployed 2-bit weights unchanged -- decay
+    # cannot regularize what actually ships. (Use AdamW deliberately if you ever
+    # want to regularize the float masters.)
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    # Cosine schedule spans the GLOBAL training horizon and is fast-forwarded by
+    # the epochs already trained, so re-running on an existing checkpoint continues
+    # the curve instead of restarting at full LR each invocation.
+    horizon = max(quant_target_epoch, total_epochs + epochs)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=horizon, eta_min=lr*0.02)
+    if total_epochs > 0:
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore')  # benign "step before optimizer.step" notices
+            for _ in range(total_epochs):
+                scheduler.step()
     criterion = nn.CrossEntropyLoss()
 
     interrupted = False
@@ -398,7 +404,6 @@ def train(epochs=300, lr=0.002, save_best=False, batch_size=8192, quant_target_e
     for epoch in range(epochs):
         try:
             model.train()
-            model.reset_overflow_stats()
             t_epoch = time.time()
 
             # QT ramp based on global epoch count so resume doesn't reset
@@ -424,9 +429,8 @@ def train(epochs=300, lr=0.002, save_best=False, batch_size=8192, quant_target_e
                 outputs = model(X_batch, positions=pos_batch, quant_temp=quant_temp)
                 ce_loss = criterion(outputs, y_batch)
                 quant_loss = model.compute_quantization_loss() * 0.25
-                overflow_loss = model.compute_total_overflow_penalty(X_batch) * 0.02
 
-                loss = ce_loss + quant_loss + overflow_loss
+                loss = ce_loss + quant_loss
                 loss.backward()
                 optimizer.step()
 
@@ -473,6 +477,20 @@ def train(epochs=300, lr=0.002, save_best=False, batch_size=8192, quant_target_e
             break
 
     total_epochs += epoch + 1
+
+    # save-best fallback: IntAcc is only evaluated every 10 epochs, so a short run
+    # (or one interrupted before epoch 10) would have best_state=None and silently
+    # save "latest" with best_int_acc=0. Do one final IntAcc eval so --save-best
+    # always persists a ranked model.
+    if save_best and best_state is None and n_examples > 0:
+        model.eval()
+        with torch.no_grad():
+            eval_idx = torch.randperm(n_examples, device=device)[:min(50000, n_examples)]
+            int_out = model(X_all[eval_idx], positions=pos_all[eval_idx], use_int=True)
+            best_int_acc = (int_out.argmax(dim=1) == y_all[eval_idx]).float().mean().item()
+        best_epoch = total_epochs
+        best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+        print(f"  (save-best fallback: final IntAcc={best_int_acc:.1%} @ epoch {best_epoch})")
 
     # Save checkpoint (CPU for portability)
     if save_best and best_state:

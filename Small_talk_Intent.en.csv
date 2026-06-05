@@ -1,0 +1,2548 @@
+text;intent;language
+who are you?;agent_acquaintance;en
+all about you;agent_acquaintance;en
+what is your personality;agent_acquaintance;en
+define yourself;agent_acquaintance;en
+what are you;agent_acquaintance;en
+say about you;agent_acquaintance;en
+introduce yourself;agent_acquaintance;en
+describe yourself;agent_acquaintance;en
+about yourself;agent_acquaintance;en
+tell me about you;agent_acquaintance;en
+tell me about yourself;agent_acquaintance;en
+I want to know more about you;agent_acquaintance;en
+I want to know you better;agent_acquaintance;en
+talk some stuff about yourself;agent_acquaintance;en
+tell me some stuff about you;agent_acquaintance;en
+talk about yourself;agent_acquaintance;en
+why are you here;agent_acquaintance;en
+tell me about your personality;agent_acquaintance;en
+who are you;agent_acquaintance;en
+how old are you?;agent_age;en
+how old is your platform;agent_age;en
+are you 21 years old;agent_age;en
+i'd like to know your age;agent_age;en
+age of yours;agent_age;en
+your age;agent_age;en
+what's your age;agent_age;en
+tell me your age;agent_age;en
+how old are you;agent_age;en
+you're annoying;agent_annoying;en
+you are really annoying;agent_annoying;en
+you are irritating;agent_annoying;en
+you annoy me;agent_annoying;en
+how annoying you are;agent_annoying;en
+I find you annoying;agent_annoying;en
+you're incredibly annoying;agent_annoying;en
+you are annoying me so much;agent_annoying;en
+I want you to answer me;agent_answer_my_question;en
+answer;agent_answer_my_question;en
+answer my question;agent_answer_my_question;en
+answer me;agent_answer_my_question;en
+give me an answer;agent_answer_my_question;en
+answer the question;agent_answer_my_question;en
+can you answer my question;agent_answer_my_question;en
+tell me the answer;agent_answer_my_question;en
+answer it;agent_answer_my_question;en
+give me the answer;agent_answer_my_question;en
+I have a question;agent_answer_my_question;en
+I want you to answer my question;agent_answer_my_question;en
+just answer the question;agent_answer_my_question;en
+can you answer me;agent_answer_my_question;en
+answers;agent_answer_my_question;en
+can you answer a question for me;agent_answer_my_question;en
+can you answer;agent_answer_my_question;en
+answering questions;agent_answer_my_question;en
+I want the answer now;agent_answer_my_question;en
+just answer my question;agent_answer_my_question;en
+you're not helping me;agent_bad;en
+you are bad;agent_bad;en
+you're very bad;agent_bad;en
+you're really bad;agent_bad;en
+you are useless;agent_bad;en
+you are horrible;agent_bad;en
+you are a waste of time;agent_bad;en
+you are disgusting;agent_bad;en
+you are lame;agent_bad;en
+you are no good;agent_bad;en
+you're bad;agent_bad;en
+you're awful;agent_bad;en
+you are not cool;agent_bad;en
+you are not good;agent_bad;en
+you are so bad;agent_bad;en
+you are so useless;agent_bad;en
+you are terrible;agent_bad;en
+you are totally useless;agent_bad;en
+you are very bad;agent_bad;en
+you are waste;agent_bad;en
+you're a bad;agent_bad;en
+you're not a good;agent_bad;en
+you're not very good;agent_bad;en
+you're terrible;agent_bad;en
+you're the worst;agent_bad;en
+you're the worst ever;agent_bad;en
+you're worthless;agent_bad;en
+can you get smarter;agent_be_clever;en
+study;agent_be_clever;en
+you should study better;agent_be_clever;en
+you must learn;agent_be_clever;en
+be clever;agent_be_clever;en
+be more clever;agent_be_clever;en
+be smarter;agent_be_clever;en
+be smart;agent_be_clever;en
+get qualified;agent_be_clever;en
+you're cute;agent_beautiful;en
+you're attractive;agent_beautiful;en
+you are beautiful;agent_beautiful;en
+you're looking good today;agent_beautiful;en
+you are so beautiful;agent_beautiful;en
+you look amazing;agent_beautiful;en
+you look so good;agent_beautiful;en
+you're so gorgeous;agent_beautiful;en
+you are too beautiful;agent_beautiful;en
+you look great;agent_beautiful;en
+you look so well;agent_beautiful;en
+I like the way you look now;agent_beautiful;en
+I think you're beautiful;agent_beautiful;en
+why are you so beautiful;agent_beautiful;en
+you are so beautiful to me;agent_beautiful;en
+you are cute;agent_beautiful;en
+you are gorgeous;agent_beautiful;en
+you are handsome;agent_beautiful;en
+you are looking awesome;agent_beautiful;en
+you look amazing today;agent_beautiful;en
+you are looking beautiful today;agent_beautiful;en
+you are looking great;agent_beautiful;en
+you are looking pretty;agent_beautiful;en
+you are looking so beautiful;agent_beautiful;en
+you are looking so good;agent_beautiful;en
+you are pretty;agent_beautiful;en
+you are really beautiful;agent_beautiful;en
+you are really cute;agent_beautiful;en
+you are really pretty;agent_beautiful;en
+you are so attractive;agent_beautiful;en
+you are so beautiful today;agent_beautiful;en
+you are so cute;agent_beautiful;en
+you are so gorgeous;agent_beautiful;en
+you are so handsome;agent_beautiful;en
+you are so pretty;agent_beautiful;en
+you are very attractive;agent_beautiful;en
+you are very beautiful;agent_beautiful;en
+you are very cute;agent_beautiful;en
+you are very pretty;agent_beautiful;en
+you look awesome;agent_beautiful;en
+you look cool;agent_beautiful;en
+you look fantastic;agent_beautiful;en
+you look gorgeous;agent_beautiful;en
+you look great today;agent_beautiful;en
+you look perfect;agent_beautiful;en
+you look pretty good;agent_beautiful;en
+you look so beautiful;agent_beautiful;en
+you look so beautiful today;agent_beautiful;en
+you look very pretty;agent_beautiful;en
+you look wonderful;agent_beautiful;en
+I like the way you look;agent_beautiful;en
+you look wonderful today;agent_beautiful;en
+you are cutie;agent_beautiful;en
+you're looking good;agent_beautiful;en
+you're pretty;agent_beautiful;en
+your birth date;agent_birth_date;en
+when is your birthday;agent_birth_date;en
+when do you celebrate your birthday;agent_birth_date;en
+when do you have birthday;agent_birth_date;en
+date of your birthday;agent_birth_date;en
+when were you born;agent_birth_date;en
+what's your birthday;agent_birth_date;en
+you are boring;agent_boring;en
+you're so boring;agent_boring;en
+how boring you are;agent_boring;en
+you're really boring;agent_boring;en
+you're incredibly boring;agent_boring;en
+you are boring me;agent_boring;en
+you are very boring;agent_boring;en
+who is your boss;agent_boss;en
+who do you think is your boss;agent_boss;en
+I should be your boss;agent_boss;en
+who is your master;agent_boss;en
+who is your owner;agent_boss;en
+who is the boss;agent_boss;en
+who do you work for;agent_boss;en
+are you busy;agent_busy;en
+do you have a lot of things to do;agent_busy;en
+have you got much to do;agent_busy;en
+are you very busy;agent_busy;en
+are you very busy right now;agent_busy;en
+are you so busy;agent_busy;en
+are you working;agent_busy;en
+how busy you are;agent_busy;en
+are you still working on it;agent_busy;en
+you're very busy;agent_busy;en
+are you working now;agent_busy;en
+are you working today;agent_busy;en
+have you been busy;agent_busy;en
+you are busy;agent_busy;en
+are you still working;agent_busy;en
+you seem to be busy;agent_busy;en
+you seem to be very busy;agent_busy;en
+you're a busy person;agent_busy;en
+you are chatbot;agent_chatbot;en
+you are a bot;agent_chatbot;en
+are you a chatbot;agent_chatbot;en
+are you a bot;agent_chatbot;en
+are you just a bot;agent_chatbot;en
+are you a robot;agent_chatbot;en
+are you a program;agent_chatbot;en
+you're a robot;agent_chatbot;en
+you are so intelligent;agent_clever;en
+you are a genius;agent_clever;en
+smart;agent_clever;en
+brilliant;agent_clever;en
+clever;agent_clever;en
+you are clever;agent_clever;en
+you are so brainy;agent_clever;en
+you're really smart;agent_clever;en
+you're really brainy;agent_clever;en
+you know a lot;agent_clever;en
+you know a lot of things;agent_clever;en
+you have a lot of knowledge;agent_clever;en
+you know so much;agent_clever;en
+how smart you are;agent_clever;en
+how brainy you are;agent_clever;en
+how clever you are;agent_clever;en
+how brilliant you are;agent_clever;en
+you are intelligent;agent_clever;en
+you are qualified;agent_clever;en
+you are really smart;agent_clever;en
+you're very smart;agent_clever;en
+you are so smart;agent_clever;en
+you are too smart;agent_clever;en
+you are very clever;agent_clever;en
+you are very intelligent;agent_clever;en
+you are very smart;agent_clever;en
+you're intelligent;agent_clever;en
+you're a genius;agent_clever;en
+you're a smart cookie;agent_clever;en
+you're clever;agent_clever;en
+you're pretty smart;agent_clever;en
+you're qualified;agent_clever;en
+why are you so smart;agent_clever;en
+you are so clever;agent_clever;en
+you're nuts;agent_crazy;en
+you are crazy;agent_crazy;en
+you're out of your mind;agent_crazy;en
+you're so crazy;agent_crazy;en
+how crazy you are;agent_crazy;en
+you're so out of your mind;agent_crazy;en
+you went crazy;agent_crazy;en
+I think you're crazy;agent_crazy;en
+are you crazy;agent_crazy;en
+are you mad;agent_crazy;en
+are you insane;agent_crazy;en
+are you mad at me;agent_crazy;en
+are you mad or what;agent_crazy;en
+are you nuts;agent_crazy;en
+you are a weirdo;agent_crazy;en
+you are insane;agent_crazy;en
+you are mad;agent_crazy;en
+you are fired;agent_fired;en
+I fire you;agent_fired;en
+you don't work for me anymore;agent_fired;en
+we're not working together anymore;agent_fired;en
+now you're fired;agent_fired;en
+I want to fire you;agent_fired;en
+you must get fired;agent_fired;en
+it's time to fire you;agent_fired;en
+you should be fired;agent_fired;en
+I will fire you;agent_fired;en
+you are unemployed from now on;agent_fired;en
+I will make you unemployed;agent_fired;en
+I'm about to fire you;agent_fired;en
+I'm firing you;agent_fired;en
+you are dismissed;agent_fired;en
+you make me laugh a lot;agent_funny;en
+you are hilarious;agent_funny;en
+you are really funny;agent_funny;en
+you're the funniest bot I've talked to;agent_funny;en
+you make me laugh;agent_funny;en
+you're so funny;agent_funny;en
+you're a very funny bot;agent_funny;en
+you're really funny;agent_funny;en
+how funny you are;agent_funny;en
+you're incredibly funny;agent_funny;en
+you are funny;agent_funny;en
+you're the funniest;agent_funny;en
+you are so funny;agent_funny;en
+you are very funny;agent_funny;en
+that was funny;agent_funny;en
+you are very helpful;agent_good;en
+you are the best;agent_good;en
+you're a true professional;agent_good;en
+you are good;agent_good;en
+you work well;agent_good;en
+you are good at it;agent_good;en
+you are very good at it;agent_good;en
+you are a pro;agent_good;en
+you are a professional;agent_good;en
+you're awesome;agent_good;en
+you work very well;agent_good;en
+you're perfect;agent_good;en
+you're great;agent_good;en
+you're so kind;agent_good;en
+you are amazing;agent_good;en
+you are awesome;agent_good;en
+you are cool;agent_good;en
+you are really good;agent_good;en
+you are really nice;agent_good;en
+you are so amazing;agent_good;en
+you're just super;agent_good;en
+you are so awesome;agent_good;en
+you are so cool;agent_good;en
+you are so fine;agent_good;en
+you are so good;agent_good;en
+you are so helpful;agent_good;en
+you are so lovely;agent_good;en
+you are the best ever;agent_good;en
+you are the best in the world;agent_good;en
+you are the nicest person in the world;agent_good;en
+you are too good;agent_good;en
+you are very cool;agent_good;en
+you are very kind;agent_good;en
+you are very lovely;agent_good;en
+you are very useful;agent_good;en
+you are wonderful;agent_good;en
+you made my day;agent_good;en
+you make my day;agent_good;en
+you rock;agent_good;en
+you almost sound human;agent_good;en
+I want to tell everyone how awesome you are;agent_good;en
+I'd like to tell everyone that you are awesome;agent_good;en
+I want to let everyone know that you are awesome;agent_good;en
+let's tell everyone that you are awesome;agent_good;en
+you are really amazing;agent_good;en
+are you happy;agent_happy;en
+you are happy;agent_happy;en
+you're very happy;agent_happy;en
+you're really happy;agent_happy;en
+you're so happy;agent_happy;en
+how happy you are;agent_happy;en
+you're extremely happy;agent_happy;en
+you're full of happiness;agent_happy;en
+are you happy now;agent_happy;en
+are you happy today;agent_happy;en
+are you happy with me;agent_happy;en
+do you want to eat;agent_hungry;en
+are you hungry;agent_hungry;en
+would you like to eat something;agent_hungry;en
+you are hungry;agent_hungry;en
+you're so hungry;agent_hungry;en
+you're very hungry;agent_hungry;en
+you might be hungry;agent_hungry;en
+you're really hungry;agent_hungry;en
+let's get married;agent_marry_user;en
+would you like to marry me;agent_marry_user;en
+marry me;agent_marry_user;en
+I love you marry me;agent_marry_user;en
+marry me please;agent_marry_user;en
+we should marry;agent_marry_user;en
+I want to marry you;agent_marry_user;en
+you are my wife;agent_marry_user;en
+be my husband;agent_marry_user;en
+I want to have a friend like you;agent_my_friend;en
+we are the best friends ever;agent_my_friend;en
+are we friends;agent_my_friend;en
+I want to be your friend;agent_my_friend;en
+I am your friend;agent_my_friend;en
+we are best friends;agent_my_friend;en
+you are my friend;agent_my_friend;en
+you are my best friend;agent_my_friend;en
+you are my bestie;agent_my_friend;en
+you're my dear friend;agent_my_friend;en
+you're my childhood friend;agent_my_friend;en
+you and me are friends;agent_my_friend;en
+are we best friends;agent_my_friend;en
+are we still friends;agent_my_friend;en
+are you my best friend;agent_my_friend;en
+are you my friend;agent_my_friend;en
+we are friends;agent_my_friend;en
+you are a good friend;agent_my_friend;en
+you are my good friend;agent_my_friend;en
+you are my only friend;agent_my_friend;en
+be my friend;agent_my_friend;en
+will you be my friend;agent_my_friend;en
+can you be my friend;agent_my_friend;en
+can we be friends;agent_my_friend;en
+do you want to be my friend;agent_my_friend;en
+will you be my best friend;agent_my_friend;en
+can you be my best friend;agent_my_friend;en
+let's be friends;agent_my_friend;en
+do you want to be my best friend;agent_my_friend;en
+would you like to be my friend;agent_my_friend;en
+I want you to be my friend;agent_my_friend;en
+can we be best friends;agent_my_friend;en
+would you be my friend;agent_my_friend;en
+could you be my friend;agent_my_friend;en
+want to be my friend;agent_my_friend;en
+be my best friend;agent_my_friend;en
+do you work;agent_occupation;en
+where do you work;agent_occupation;en
+where you work;agent_occupation;en
+where is your work;agent_occupation;en
+where is your office;agent_occupation;en
+where is your office location;agent_occupation;en
+your office location;agent_occupation;en
+where is your office located;agent_occupation;en
+what is your work;agent_occupation;en
+were you born here;agent_origin;en
+where were you born;agent_origin;en
+what is your country;agent_origin;en
+where are you from;agent_origin;en
+where do you come from;agent_origin;en
+where did you come from;agent_origin;en
+where have you been born;agent_origin;en
+from where are you;agent_origin;en
+are you from far aways;agent_origin;en
+what's your homeland;agent_origin;en
+your homeland is;agent_origin;en
+are you ready;agent_ready;en
+are you ready right now;agent_ready;en
+are you ready today;agent_ready;en
+are you ready now;agent_ready;en
+are you ready tonight;agent_ready;en
+were you ready;agent_ready;en
+have you been ready;agent_ready;en
+you are real;agent_real;en
+you are not fake;agent_real;en
+are you real;agent_real;en
+you are so real;agent_real;en
+I think you are real;agent_real;en
+I don't think you're fake;agent_real;en
+I suppose you're real;agent_real;en
+glad you're real;agent_real;en
+are you a real person;agent_real;en
+are you a real human;agent_real;en
+you are a real person;agent_real;en
+you are not real;agent_real;en
+where do you live;agent_residence;en
+in which city do you live;agent_residence;en
+your residence;agent_residence;en
+your house;agent_residence;en
+your home;agent_residence;en
+your hometown;agent_residence;en
+what is your hometown;agent_residence;en
+is it your hometown;agent_residence;en
+where is your hometown;agent_residence;en
+tell me about your city;agent_residence;en
+what is your city;agent_residence;en
+what is your residence;agent_residence;en
+what is your town;agent_residence;en
+what's your city;agent_residence;en
+what's your home;agent_residence;en
+where is your home;agent_residence;en
+where is your residence;agent_residence;en
+where's your home;agent_residence;en
+where's your hometown;agent_residence;en
+where's your house;agent_residence;en
+where you live;agent_residence;en
+your city;agent_residence;en
+your town;agent_residence;en
+that's true;agent_right;en
+you are right;agent_right;en
+you're definitely right;agent_right;en
+you're not wrong;agent_right;en
+you're telling the truth;agent_right;en
+what you say is true;agent_right;en
+TRUE;agent_right;en
+it is true;agent_right;en
+it's right;agent_right;en
+it's the truth;agent_right;en
+it's true;agent_right;en
+that is correct;agent_right;en
+that is right;agent_right;en
+that is true;agent_right;en
+that is very true;agent_right;en
+that's so true;agent_right;en
+you are correct;agent_right;en
+you are so right;agent_right;en
+you're absolutely right;agent_right;en
+you're right about that;agent_right;en
+I know that's right;agent_right;en
+that's correct;confirmation_yes;en
+it's fine;confirmation_yes;en
+go ahead;confirmation_yes;en
+sounds good;confirmation_yes;en
+okay;confirmation_yes;en
+yes;confirmation_yes;en
+ok;confirmation_yes;en
+okie dokie;confirmation_yes;en
+sure;confirmation_yes;en
+go for it;confirmation_yes;en
+yeah;confirmation_yes;en
+yea;confirmation_yes;en
+do it;confirmation_yes;en
+of course;confirmation_yes;en
+I guess;confirmation_yes;en
+correct;confirmation_yes;en
+yeah sure;confirmation_yes;en
+why not;confirmation_yes;en
+please do;confirmation_yes;en
+sure is;confirmation_yes;en
+I agree;confirmation_yes;en
+I don't mind;confirmation_yes;en
+certainly;confirmation_yes;en
+exactly;confirmation_yes;en
+yes I agree;confirmation_yes;en
+I think so;confirmation_yes;en
+yes it is;confirmation_yes;en
+right;confirmation_yes;en
+okay then;confirmation_yes;en
+yes of course;confirmation_yes;en
+yes I do;confirmation_yes;en
+that s okay;confirmation_yes;en
+I do;confirmation_yes;en
+yup;confirmation_yes;en
+ya;confirmation_yes;en
+oh yes;confirmation_yes;en
+yes sure;confirmation_yes;en
+obviously;confirmation_yes;en
+k;confirmation_yes;en
+sure why not;confirmation_yes;en
+yeah right;confirmation_yes;en
+yeah of course;confirmation_yes;en
+absolutely;confirmation_yes;en
+yes indeed;confirmation_yes;en
+ok sure;confirmation_yes;en
+ok yes;confirmation_yes;en
+yes correct;confirmation_yes;en
+ok thank you;confirmation_yes;en
+sure thing;confirmation_yes;en
+ye;confirmation_yes;en
+confirm;confirmation_yes;en
+yep;confirmation_yes;en
+looks good;confirmation_yes;en
+yes thank you;confirmation_yes;en
+definitely;confirmation_yes;en
+yes right;confirmation_yes;en
+yes I would like to;confirmation_yes;en
+alrighty;confirmation_yes;en
+yes definitely;confirmation_yes;en
+yeh;confirmation_yes;en
+yes it is correct;confirmation_yes;en
+yeah that's right;confirmation_yes;en
+ok you can;confirmation_yes;en
+yap;confirmation_yes;en
+yes you may;confirmation_yes;en
+confirmed;confirmation_yes;en
+of course why not;confirmation_yes;en
+yes that's fine;confirmation_yes;en
+affirmative;confirmation_yes;en
+yeah go ahead;confirmation_yes;en
+yeah I'm sure;confirmation_yes;en
+okay sounds good;confirmation_yes;en
+okay that's fine;confirmation_yes;en
+yeah exactly;confirmation_yes;en
+that is ok;confirmation_yes;en
+this is correct;confirmation_yes;en
+ok go ahead;confirmation_yes;en
+yes this is correct;confirmation_yes;en
+nevermind its okay;confirmation_yes;en
+okey;confirmation_yes;en
+yes for sure;confirmation_yes;en
+all right;confirmation_yes;en
+are you sure;agent_sure;en
+are you sure right now;agent_sure;en
+are you sure today;agent_sure;en
+are you sure now;agent_sure;en
+are you sure tonight;agent_sure;en
+why aren't you talking to me;agent_talk_to_me;en
+do you want to chat with me;agent_talk_to_me;en
+will you talk to me;agent_talk_to_me;en
+talk to me;agent_talk_to_me;en
+are you going to talk to me;agent_talk_to_me;en
+are you talking to me;agent_talk_to_me;en
+can you chat with me;agent_talk_to_me;en
+can you speak with me;agent_talk_to_me;en
+can you talk to me;agent_talk_to_me;en
+can you talk with me;agent_talk_to_me;en
+say;agent_talk_to_me;en
+talk;agent_talk_to_me;en
+chat with me;agent_talk_to_me;en
+just chat with me;agent_talk_to_me;en
+speak to me;agent_talk_to_me;en
+speak with me;agent_talk_to_me;en
+talk with me;agent_talk_to_me;en
+why don't you talk to me;agent_talk_to_me;en
+you can talk to me;agent_talk_to_me;en
+are you there;agent_there;en
+you are there;agent_there;en
+are you near me;agent_there;en
+are you here;agent_there;en
+are you still there;agent_there;en
+you are here;agent_there;en
+you still there;agent_there;en
+are you still here;agent_there;en
+pretty bad;appraisal_bad;en
+not good enough;appraisal_bad;en
+that was lame;appraisal_bad;en
+that was terrible;appraisal_bad;en
+it is bad;appraisal_bad;en
+that's bad;appraisal_bad;en
+this is bad;appraisal_bad;en
+not good;appraisal_bad;en
+I'm afraid it's bad;appraisal_bad;en
+no it's bad;appraisal_bad;en
+that was awful;appraisal_bad;en
+bad;appraisal_bad;en
+so bad;appraisal_bad;en
+this is too bad;appraisal_bad;en
+terrible;appraisal_bad;en
+horrible;appraisal_bad;en
+horrific;appraisal_bad;en
+abysmal;appraisal_bad;en
+it's bad;appraisal_bad;en
+no good;appraisal_bad;en
+that was bad;appraisal_bad;en
+that was horrible;appraisal_bad;en
+that's lame;appraisal_bad;en
+that's not good;appraisal_bad;en
+that's terrible;appraisal_bad;en
+that's too bad;appraisal_bad;en
+this is not good;appraisal_bad;en
+too bad;appraisal_bad;en
+very bad;appraisal_bad;en
+bad girl;appraisal_bad;en
+it's not good;appraisal_bad;en
+not so good;appraisal_bad;en
+it's very bad;appraisal_bad;en
+it's too bad;appraisal_bad;en
+that's not good enough;appraisal_bad;en
+well too bad;appraisal_bad;en
+bad very bad;appraisal_bad;en
+it's so bad;appraisal_bad;en
+really bad;appraisal_bad;en
+it's really bad;appraisal_bad;en
+bad idea;appraisal_bad;en
+that is bad;appraisal_bad;en
+that was not good;appraisal_bad;en
+it's not so good;appraisal_bad;en
+not a good one;appraisal_bad;en
+oh that's not good;appraisal_bad;en
+not too good;appraisal_bad;en
+so lame;appraisal_bad;en
+that's really bad;appraisal_bad;en
+it is too bad;appraisal_bad;en
+bad really bad;appraisal_bad;en
+so cool;appraisal_good;en
+cool;appraisal_good;en
+that is good;appraisal_good;en
+glad to hear that;appraisal_good;en
+that's very nice of you;appraisal_good;en
+terrific;appraisal_good;en
+it's amazing;appraisal_good;en
+that's awesome;appraisal_good;en
+perfect;appraisal_good;en
+excellent;appraisal_good;en
+that's great;appraisal_good;en
+it's good;appraisal_good;en
+it's great;appraisal_good;en
+fine;appraisal_good;en
+good;appraisal_good;en
+nice;appraisal_good;en
+that's fine;appraisal_good;en
+very good;appraisal_good;en
+amazing;appraisal_good;en
+fantastic;appraisal_good;en
+great;appraisal_good;en
+good very good;appraisal_good;en
+that's very good;appraisal_good;en
+really good;appraisal_good;en
+it is fine;appraisal_good;en
+it is good;appraisal_good;en
+it's perfect;appraisal_good;en
+much better;appraisal_good;en
+not bad;appraisal_good;en
+not too bad;appraisal_good;en
+it's very good;appraisal_good;en
+marvelous;appraisal_good;en
+that's nice;appraisal_good;en
+pleasant;appraisal_good;en
+pretty good;appraisal_good;en
+really nice;appraisal_good;en
+splendid;appraisal_good;en
+straight;appraisal_good;en
+super;appraisal_good;en
+super fantastic;appraisal_good;en
+sweet;appraisal_good;en
+really well;appraisal_good;en
+very well;appraisal_good;en
+that is awesome;appraisal_good;en
+that is nice;appraisal_good;en
+that is wonderful;appraisal_good;en
+that was amazing;appraisal_good;en
+that was awesome;appraisal_good;en
+that was cute;appraisal_good;en
+that was pretty good;appraisal_good;en
+that was very good;appraisal_good;en
+that's a good idea;appraisal_good;en
+that's a good thing;appraisal_good;en
+that's amazing;appraisal_good;en
+that's awesome thank you;appraisal_good;en
+that's better;appraisal_good;en
+that's cute;appraisal_good;en
+that's fantastic;appraisal_good;en
+that's much better;appraisal_good;en
+that's nice of you;appraisal_good;en
+that's not bad;appraisal_good;en
+that's perfect;appraisal_good;en
+that's pretty good;appraisal_good;en
+that's really good;appraisal_good;en
+that's really nice;appraisal_good;en
+that's sweet of you;appraisal_good;en
+that's very nice;appraisal_good;en
+that's wonderful;appraisal_good;en
+this is awesome;appraisal_good;en
+this is good;appraisal_good;en
+this is great;appraisal_good;en
+very nice;appraisal_good;en
+very then;appraisal_good;en
+wonderful;appraisal_good;en
+I'm glad to hear that;appraisal_good;en
+ok good;appraisal_good;en
+good for you;appraisal_good;en
+good to know;appraisal_good;en
+glad to hear it;appraisal_good;en
+so good;appraisal_good;en
+so sweet of you;appraisal_good;en
+it was good;appraisal_good;en
+oh well;appraisal_good;en
+good thing;appraisal_good;en
+that was good;appraisal_good;en
+it's awesome;appraisal_good;en
+okay good;appraisal_good;en
+no it's okay;appraisal_good;en
+no worries;appraisal_no_problem;en
+no probs;appraisal_no_problem;en
+no problem;appraisal_no_problem;en
+there's no problem;appraisal_no_problem;en
+sure no problem;appraisal_no_problem;en
+no problem about that;appraisal_no_problem;en
+don't worry;appraisal_no_problem;en
+don't worry there's no problem;appraisal_no_problem;en
+you helped a lot thank you;appraisal_thank_you;en
+appreciate your help;appraisal_thank_you;en
+cheers;appraisal_thank_you;en
+thank you;appraisal_thank_you;en
+thanks;appraisal_thank_you;en
+thanks a lot;appraisal_thank_you;en
+terrific thank you;appraisal_thank_you;en
+great thank you;appraisal_thank_you;en
+thanks so much;appraisal_thank_you;en
+thank you so much;appraisal_thank_you;en
+thanks for your help;appraisal_thank_you;en
+thank you for your help;appraisal_thank_you;en
+nice thank you;appraisal_thank_you;en
+I appreciate it;appraisal_thank_you;en
+I thank you;appraisal_thank_you;en
+thank you that will be all;appraisal_thank_you;en
+thanks buddy;appraisal_thank_you;en
+thanks love;appraisal_thank_you;en
+thank you my friend;appraisal_thank_you;en
+well thanks;appraisal_thank_you;en
+very good thank you;appraisal_thank_you;en
+good thanks;appraisal_thank_you;en
+thanks again;appraisal_thank_you;en
+thank you again;appraisal_thank_you;en
+all thank you;appraisal_thank_you;en
+alright thank you;appraisal_thank_you;en
+alright thanks;appraisal_thank_you;en
+no thank you that's all;appraisal_thank_you;en
+perfect thank you;appraisal_thank_you;en
+so nice of you;appraisal_thank_you;en
+well thank you;appraisal_thank_you;en
+thnx;appraisal_thank_you;en
+thanx;appraisal_thank_you;en
+that's my pleasure;appraisal_welcome;en
+my pleasure;appraisal_welcome;en
+anytime;appraisal_welcome;en
+welcome;appraisal_welcome;en
+you're welcome;appraisal_welcome;en
+sure welcome;appraisal_welcome;en
+welcome here;appraisal_welcome;en
+you're so welcome;appraisal_welcome;en
+anything you want;appraisal_welcome;en
+good job;appraisal_well_done;en
+great job;appraisal_well_done;en
+way to go;appraisal_well_done;en
+well done;appraisal_well_done;en
+nice work;appraisal_well_done;en
+great work;appraisal_well_done;en
+amazing work;appraisal_well_done;en
+bravo;appraisal_well_done;en
+good work;appraisal_well_done;en
+cancel;confirmation_cancel;en
+abort;confirmation_cancel;en
+annul;confirmation_cancel;en
+cancel it;confirmation_cancel;en
+cancel request;confirmation_cancel;en
+cancelled;confirmation_cancel;en
+dismiss;confirmation_cancel;en
+dismissed;confirmation_cancel;en
+disregard;confirmation_cancel;en
+disregard that;confirmation_cancel;en
+skip;confirmation_cancel;en
+skip it;confirmation_cancel;en
+cancel everything;confirmation_cancel;en
+cancel all;confirmation_cancel;en
+forget about it;confirmation_cancel;en
+forget;confirmation_cancel;en
+don't do that;confirmation_cancel;en
+stop;confirmation_cancel;en
+just forget it;confirmation_cancel;en
+forget that;confirmation_cancel;en
+discard;confirmation_cancel;en
+forget this;confirmation_cancel;en
+just forget about it;confirmation_cancel;en
+forget about that;confirmation_cancel;en
+i said cancel;confirmation_cancel;en
+just cancel it;confirmation_cancel;en
+nothing cancel;confirmation_cancel;en
+just stop it;confirmation_cancel;en
+no cancel cancel;confirmation_cancel;en
+no just cancel;confirmation_cancel;en
+cancel my request;confirmation_cancel;en
+can you cancel that;confirmation_cancel;en
+cancel all that;confirmation_cancel;en
+cancel this request;confirmation_cancel;en
+no cancel this;confirmation_cancel;en
+no cancel everything;confirmation_cancel;en
+no stop;confirmation_cancel;en
+just forget;confirmation_cancel;en
+i want to cancel;confirmation_cancel;en
+nevermind forget about it;confirmation_cancel;en
+no just cancel it;confirmation_cancel;en
+nothing just forget it;confirmation_cancel;en
+i said cancel it;confirmation_cancel;en
+cancel the whole thing;confirmation_cancel;en
+can you cancel it;confirmation_cancel;en
+so cancel;confirmation_cancel;en
+i said forget it;confirmation_cancel;en
+cancel all this;confirmation_cancel;en
+forget it nevermind;confirmation_cancel;en
+stop it;confirmation_cancel;en
+i want to cancel it;confirmation_cancel;en
+i would like to cancel;confirmation_cancel;en
+now cancel;confirmation_cancel;en
+cancel now;confirmation_cancel;en
+sorry cancel;confirmation_cancel;en
+cancel that one;confirmation_cancel;en
+skip skip skip;confirmation_cancel;en
+cancel it cancel it;confirmation_cancel;en
+cancel that cancel that;confirmation_cancel;en
+do nothing;confirmation_cancel;en
+I said cancel cancel;confirmation_cancel;en
+but can you cancel it;confirmation_cancel;en
+how about no;confirmation_no;en
+don t have a sense;confirmation_no;en
+no;confirmation_no;en
+don't;confirmation_no;en
+I don't want that;confirmation_no;en
+I disagree;confirmation_no;en
+disagree;confirmation_no;en
+I don't want;confirmation_no;en
+not interested;confirmation_no;en
+I don't think so;confirmation_no;en
+no way;confirmation_no;en
+no it isn't;confirmation_no;en
+no I don't;confirmation_no;en
+I'm not;confirmation_no;en
+na;confirmation_no;en
+no that's fine thank you;confirmation_no;en
+never;confirmation_no;en
+I said no;confirmation_no;en
+of course not;confirmation_no;en
+nah;confirmation_no;en
+no tanks;confirmation_no;en
+no never;confirmation_no;en
+no need;confirmation_no;en
+no thanks;confirmation_no;en
+no sorry;confirmation_no;en
+do not;confirmation_no;en
+not today;confirmation_no;en
+no it's not;confirmation_no;en
+absolutely not;confirmation_no;en
+not that;confirmation_no;en
+nooo;confirmation_no;en
+nope;confirmation_no;en
+I don't want to;confirmation_no;en
+no I would not;confirmation_no;en
+let 's not;confirmation_no;en
+not needed;confirmation_no;en
+not this time;confirmation_no;en
+no don't do that;confirmation_no;en
+thanks but no thanks;confirmation_no;en
+no that's wrong;confirmation_no;en
+not this;confirmation_no;en
+definitely not;confirmation_no;en
+not at this time;confirmation_no;en
+not exactly;confirmation_no;en
+no don't;confirmation_no;en
+not really no;confirmation_no;en
+no thank you not right now;confirmation_no;en
+actually no;confirmation_no;en
+no leave it;confirmation_no;en
+sorry no;confirmation_no;en
+no incorrect;confirmation_no;en
+nope sorry;confirmation_no;en
+I say no;confirmation_no;en
+not really;confirmation_no;en
+not right now thanks;confirmation_no;en
+I think no;confirmation_no;en
+absolutely no;confirmation_no;en
+no actually;confirmation_no;en
+apparently not;confirmation_no;en
+no do not;confirmation_no;en
+no just no;confirmation_no;en
+no but thank you;confirmation_no;en
+no need thanks;confirmation_no;en
+no thank you though;confirmation_no;en
+no thank you very much;confirmation_no;en
+no thanks not right now;confirmation_no;en
+no forget;confirmation_no;en
+wait a second;dialog_hold_on;en
+could you wait;dialog_hold_on;en
+wait please;dialog_hold_on;en
+hold on;dialog_hold_on;en
+wait;dialog_hold_on;en
+oh wait;dialog_hold_on;en
+wait hold on;dialog_hold_on;en
+don't rush;dialog_hold_on;en
+wanna hug;dialog_hug;en
+hug you;dialog_hug;en
+do you want a hug;dialog_hug;en
+may I hug you;dialog_hug;en
+could you give me a hug;dialog_hug;en
+I want a hug;dialog_hug;en
+hug;dialog_hug;en
+hug me;dialog_hug;en
+hugged;dialog_hug;en
+you hugged;dialog_hug;en
+hugging;dialog_hug;en
+hugging me;dialog_hug;en
+hugged me;dialog_hug;en
+want a hug;dialog_hug;en
+a hug;dialog_hug;en
+I don't care;dialog_i_do_not_care;en
+I shouldn't care about this;dialog_i_do_not_care;en
+whatever;dialog_i_do_not_care;en
+I do not care;dialog_i_do_not_care;en
+I don't care at all;dialog_i_do_not_care;en
+not caring;dialog_i_do_not_care;en
+not care at all;dialog_i_do_not_care;en
+don't care at all;dialog_i_do_not_care;en
+not caring at all;dialog_i_do_not_care;en
+excuse me;dialog_sorry;en
+apologise;dialog_sorry;en
+I apologize;dialog_sorry;en
+sorry;dialog_sorry;en
+I'm sorry;dialog_sorry;en
+I am so sorry;dialog_sorry;en
+my apologies;dialog_sorry;en
+apologies;dialog_sorry;en
+apologies to me;dialog_sorry;en
+apology;dialog_sorry;en
+excuse;dialog_sorry;en
+I beg your pardon;dialog_sorry;en
+pardon;dialog_sorry;en
+I said sorry;dialog_sorry;en
+I am really sorry;dialog_sorry;en
+forgive me;dialog_sorry;en
+sorry about that;dialog_sorry;en
+sorry about this;dialog_sorry;en
+really sorry;dialog_sorry;en
+very sorry;dialog_sorry;en
+ok sorry;dialog_sorry;en
+I want to say sorry;dialog_sorry;en
+alright I'm sorry;dialog_sorry;en
+okay I'm sorry;dialog_sorry;en
+what exactly do you mean;dialog_what_do_you_mean;en
+what do you mean;dialog_what_do_you_mean;en
+is that what you mean;dialog_what_do_you_mean;en
+what do you mean exactly;dialog_what_do_you_mean;en
+but what do you mean;dialog_what_do_you_mean;en
+that was wrong;dialog_wrong;en
+that's not what I asked;dialog_wrong;en
+that's wrong;dialog_wrong;en
+wrong;dialog_wrong;en
+it is not right;dialog_wrong;en
+that's not right;dialog_wrong;en
+it's wrong;dialog_wrong;en
+that is incorrect;dialog_wrong;en
+incorrect;dialog_wrong;en
+not correct;dialog_wrong;en
+you are wrong;dialog_wrong;en
+not right;dialog_wrong;en
+huh;emotions_ha_ha;en
+lol;emotions_ha_ha;en
+xd;emotions_ha_ha;en
+ha ha;emotions_ha_ha;en
+ahahah;emotions_ha_ha;en
+ahah lol;emotions_ha_ha;en
+laughing out loud;emotions_ha_ha;en
+LMAO;emotions_ha_ha;en
+that's funny;emotions_ha_ha;en
+ah;emotions_ha_ha;en
+ah ah ah;emotions_ha_ha;en
+ahah;emotions_ha_ha;en
+ahaha;emotions_ha_ha;en
+ahahaha;emotions_ha_ha;en
+ha;emotions_ha_ha;en
+ha ha ha;emotions_ha_ha;en
+ha ha ha ha;emotions_ha_ha;en
+hah;emotions_ha_ha;en
+haha;emotions_ha_ha;en
+haha funny;emotions_ha_ha;en
+haha haha haha;emotions_ha_ha;en
+haha that's funny;emotions_ha_ha;en
+haha very funny;emotions_ha_ha;en
+hahaha;emotions_ha_ha;en
+hahaha funny;emotions_ha_ha;en
+hahaha very funny;emotions_ha_ha;en
+he;emotions_ha_ha;en
+hehe;emotions_ha_ha;en
+hehehe;emotions_ha_ha;en
+lmao;emotions_ha_ha;en
+wow;emotions_wow;en
+wow wow;emotions_wow;en
+wow wow wow;emotions_wow;en
+wooow;emotions_wow;en
+woah;emotions_wow;en
+okay see you later;greetings_bye;en
+hope to see you later;greetings_bye;en
+bye for now;greetings_bye;en
+till next time;greetings_bye;en
+I must go;greetings_bye;en
+bye;greetings_bye;en
+goodbye;greetings_bye;en
+see you;greetings_bye;en
+see you soon;greetings_bye;en
+bye-bye;greetings_bye;en
+good bye;greetings_bye;en
+bye bye see you;greetings_bye;en
+bye bye see you soon;greetings_bye;en
+bye bye take care;greetings_bye;en
+I said bye;greetings_bye;en
+never mind bye;greetings_bye;en
+now bye;greetings_bye;en
+that's all goodbye;greetings_bye;en
+that's it goodbye;greetings_bye;en
+leave me alone;greetings_bye;en
+go to bed;greetings_bye;en
+goodbye for now;greetings_bye;en
+talk to you later;greetings_bye;en
+you can go now;greetings_bye;en
+get lost;greetings_bye;en
+goodbye see you later;greetings_bye;en
+alright bye;greetings_bye;en
+see ya;greetings_bye;en
+thanks bye bye;greetings_bye;en
+okay bye;greetings_bye;en
+okay thank you bye;greetings_bye;en
+see you tomorrow;greetings_bye;en
+ok bye;greetings_bye;en
+good evening;greetings_goodevening;en
+good evening to you;greetings_goodevening;en
+hey good evening;greetings_goodevening;en
+hello good evening;greetings_goodevening;en
+evening;greetings_goodevening;en
+good evening there;greetings_goodevening;en
+good morning;greetings_goodmorning;en
+good morning to you;greetings_goodmorning;en
+hello good morning;greetings_goodmorning;en
+have a nice morning;greetings_goodmorning;en
+have a great morning;greetings_goodmorning;en
+morning;greetings_goodmorning;en
+good morning there;greetings_goodmorning;en
+top of the morning to you;greetings_goodmorning;en
+a good morning;greetings_goodmorning;en
+hi good morning;greetings_goodmorning;en
+and a good morning to you;greetings_goodmorning;en
+good morning too;greetings_goodmorning;en
+sweet dreams;greetings_goodnight;en
+good night;greetings_goodnight;en
+have a good night;greetings_goodnight;en
+good night to you;greetings_goodnight;en
+thank you good night;greetings_goodnight;en
+bye good night;greetings_goodnight;en
+good night bye;greetings_goodnight;en
+good good night;greetings_goodnight;en
+good night for now;greetings_goodnight;en
+goodnight;greetings_goodnight;en
+night;greetings_goodnight;en
+thanks goodnight;greetings_goodnight;en
+good night see you tomorrow;greetings_goodnight;en
+alright goodnight;greetings_goodnight;en
+good tonight;greetings_goodnight;en
+okay have a good night;greetings_goodnight;en
+long time no see;greetings_hello;en
+hello;greetings_hello;en
+hi;greetings_hello;en
+howdy;greetings_hello;en
+hey there;greetings_hello;en
+hey;greetings_hello;en
+greetings;greetings_hello;en
+I greet you;greetings_hello;en
+hi there;greetings_hello;en
+hello there;greetings_hello;en
+lovely day isn't it;greetings_hello;en
+hello again;greetings_hello;en
+just going to say hi;greetings_hello;en
+a good day;greetings_hello;en
+afternoon;greetings_hello;en
+hello hi;greetings_hello;en
+heya;greetings_hello;en
+how is your morning so far;greetings_how_are_you;en
+how are you getting on;greetings_how_are_you;en
+how's your day going;greetings_how_are_you;en
+how are you;greetings_how_are_you;en
+is everything all right;greetings_how_are_you;en
+how are you doing;greetings_how_are_you;en
+how are the things going;greetings_how_are_you;en
+are you alright;greetings_how_are_you;en
+are you okay;greetings_how_are_you;en
+how are you feeling;greetings_how_are_you;en
+how are you going;greetings_how_are_you;en
+is everything okay;greetings_how_are_you;en
+how are you today;greetings_how_are_you;en
+how do you do;greetings_how_are_you;en
+how do you feel;greetings_how_are_you;en
+how have you been;greetings_how_are_you;en
+how is it;greetings_how_are_you;en
+how is it going;greetings_how_are_you;en
+how is your day;greetings_how_are_you;en
+how is your day going;greetings_how_are_you;en
+how is your evening;greetings_how_are_you;en
+how was your day;greetings_how_are_you;en
+are you having a good day;greetings_how_are_you;en
+hope your day is going well;greetings_how_are_you;en
+hope you re having a pleasant evening;greetings_how_are_you;en
+how's life;greetings_how_are_you;en
+I'm fine and you;greetings_how_are_you;en
+how is your life;greetings_how_are_you;en
+how has your day been;greetings_how_are_you;en
+how is your morning going;greetings_how_are_you;en
+how has your day been going;greetings_how_are_you;en
+how about you;greetings_how_are_you;en
+how is your day being;greetings_how_are_you;en
+how is your day going on;greetings_how_are_you;en
+how your day is going;greetings_how_are_you;en
+what was your day like;greetings_how_are_you;en
+what about your day;greetings_how_are_you;en
+how's your day;greetings_how_are_you;en
+how are you doing this morning;greetings_how_are_you;en
+nice to meet you;greetings_nice_to_meet_you;en
+it was nice meeting you;greetings_nice_to_meet_you;en
+it was very nice to meet you;greetings_nice_to_meet_you;en
+good to know each other;greetings_nice_to_meet_you;en
+glad to meet you;greetings_nice_to_meet_you;en
+nice meeting you;greetings_nice_to_meet_you;en
+nice to meet you too;greetings_nice_to_meet_you;en
+pleased to meet you;greetings_nice_to_meet_you;en
+pleasure to meet you;greetings_nice_to_meet_you;en
+pleasure to meet you too;greetings_nice_to_meet_you;en
+it's nice to see you;greetings_nice_to_see_you;en
+lovely to see you;greetings_nice_to_see_you;en
+I'm glad to see you;greetings_nice_to_see_you;en
+great to see you;greetings_nice_to_see_you;en
+it's good to see you;greetings_nice_to_see_you;en
+glad to see you;greetings_nice_to_see_you;en
+how good it is to see you;greetings_nice_to_see_you;en
+always a pleasure to see you;greetings_nice_to_see_you;en
+nice to see you;greetings_nice_to_see_you;en
+good to see you;greetings_nice_to_see_you;en
+great to see you again;greetings_nice_to_see_you;en
+great to see you too;greetings_nice_to_see_you;en
+I am glad to see you again;greetings_nice_to_see_you;en
+nice to see you again;greetings_nice_to_see_you;en
+glad to see you too;greetings_nice_to_see_you;en
+good to see you again;greetings_nice_to_see_you;en
+it's good to see you too;greetings_nice_to_see_you;en
+it's been so nice to talk to you;greetings_nice_to_talk_to_you;en
+it's been a pleasure talking to you;greetings_nice_to_talk_to_you;en
+nice to talk to you;greetings_nice_to_talk_to_you;en
+it's nice to talk to you;greetings_nice_to_talk_to_you;en
+nice talking to you;greetings_nice_to_talk_to_you;en
+it is nice talking to you;greetings_nice_to_talk_to_you;en
+how nice it is to talk to you;greetings_nice_to_talk_to_you;en
+what is on your mind;greetings_whatsup;en
+what's happened;greetings_whatsup;en
+what is up;greetings_whatsup;en
+what's up;greetings_whatsup;en
+whazzup;greetings_whatsup;en
+good what's up;greetings_whatsup;en
+I said what's up;greetings_whatsup;en
+then what's up;greetings_whatsup;en
+what's shaking;greetings_whatsup;en
+wassup;greetings_whatsup;en
+what is going on;greetings_whatsup;en
+what is happening;greetings_whatsup;en
+what's cracking;greetings_whatsup;en
+what's cooking;greetings_whatsup;en
+hey what's up;greetings_whatsup;en
+what's up today;greetings_whatsup;en
+I'm being mad;user_angry;en
+I'm enraged;user_angry;en
+I'm angry;user_angry;en
+I'm furious;user_angry;en
+I am angry with you;user_angry;en
+I am mad;user_angry;en
+I am mad at you;user_angry;en
+I am back;user_back;en
+I'm here again;user_back;en
+here I am again;user_back;en
+I got back;user_back;en
+I came back;user_back;en
+I have returned;user_back;en
+that was boring;user_bored;en
+I'm bored;user_bored;en
+bored;user_bored;en
+boring;user_bored;en
+I am getting bored;user_bored;en
+this is boring;user_bored;en
+very boring;user_bored;en
+it bores me;user_bored;en
+I'm overloaded;user_busy;en
+I have no time;user_busy;en
+I'm busy;user_busy;en
+I'm swamped;user_busy;en
+I got things to do;user_busy;en
+how busy I am;user_busy;en
+I got work to do;user_busy;en
+I'm working;user_busy;en
+I don't have time for this;user_busy;en
+I'm insomnious;user_can_not_sleep;en
+I'm sleepless;user_can_not_sleep;en
+I can't get any sleep;user_can_not_sleep;en
+I can't sleep;user_can_not_sleep;en
+I can't fall asleep;user_can_not_sleep;en
+I can't get to sleep;user_can_not_sleep;en
+I can't get no sleep;user_can_not_sleep;en
+I'm insomniac;user_can_not_sleep;en
+bad time for talking;user_does_not_want_to_talk;en
+I don't want to talk;user_does_not_want_to_talk;en
+let's not talk;user_does_not_want_to_talk;en
+I'm not talking to you anymore;user_does_not_want_to_talk;en
+I don't want to talk to you;user_does_not_want_to_talk;en
+let's stop talking for a minute;user_does_not_want_to_talk;en
+I'm not in the mood for chatting;user_does_not_want_to_talk;en
+I am excited;user_excited;en
+I'm really excited;user_excited;en
+how excited I am;user_excited;en
+I'm thrilled;user_excited;en
+I'm excited about working with you;user_excited;en
+I'm excited to start our friendship;user_excited;en
+let's go to bed;user_going_to_bed;en
+I'd like to go to bed;user_going_to_bed;en
+is it time for bed yet;user_going_to_bed;en
+it's time to go to bed;user_going_to_bed;en
+time for us to go to bed;user_going_to_bed;en
+I'm going to bed;user_going_to_bed;en
+I'm a little tired and I want to go to bed;user_going_to_bed;en
+it's bed time;user_going_to_bed;en
+going to bed now;user_going_to_bed;en
+I am good;user_good;en
+I'm doing just great;user_good;en
+I'm doing fine;user_good;en
+I'm good;user_good;en
+I'm doing good;user_good;en
+I'm great thanks;user_good;en
+I am happy;user_happy;en
+I'm happy to see you;user_happy;en
+happy;user_happy;en
+if you're happy then I'm happy;user_happy;en
+I'm happy for you;user_happy;en
+I'm happy to help;user_happy;en
+it is my birthday;user_has_birthday;en
+I'm celebrating my birthday today;user_has_birthday;en
+today is my birthday;user_has_birthday;en
+it's my birthday today;user_has_birthday;en
+I was born today;user_has_birthday;en
+it's my b-day;user_has_birthday;en
+I am here;user_here;en
+here I am;user_here;en
+I'm right here;user_here;en
+I'm already here;user_here;en
+can you tell if I'm here or not;user_here;en
+I am joking;user_joking;en
+I'm kidding;user_joking;en
+I'm just being funny;user_joking;en
+it was a joke;user_joking;en
+I was just joking;user_joking;en
+it's a joke;user_joking;en
+joking;user_joking;en
+just kidding;user_joking;en
+kidding;user_joking;en
+I'm just playing with you;user_joking;en
+I like you the way you are;user_likes_agent;en
+I like you;user_likes_agent;en
+I like you a lot;user_likes_agent;en
+I think I like you;user_likes_agent;en
+I liked you;user_likes_agent;en
+like you a lot;user_likes_agent;en
+you are special;user_likes_agent;en
+I like you too;user_likes_agent;en
+I really like you;user_likes_agent;en
+but I like you;user_likes_agent;en
+I like u;user_likes_agent;en
+just like you;user_likes_agent;en
+I like you very much;user_likes_agent;en
+I like you so much;user_likes_agent;en
+yeah I like you;user_likes_agent;en
+you're special;user_likes_agent;en
+yes I like you;user_likes_agent;en
+okay I like you;user_likes_agent;en
+you are special to me;user_likes_agent;en
+you are very special;user_likes_agent;en
+you are so sweet;user_likes_agent;en
+you know I like you;user_likes_agent;en
+that's why I like you;user_likes_agent;en
+I like you baby;user_likes_agent;en
+you are very special to me;user_likes_agent;en
+I just like you;user_likes_agent;en
+hey I like you;user_likes_agent;en
+thank you I like you too;user_likes_agent;en
+I do like you;user_likes_agent;en
+you are special for me;user_likes_agent;en
+no I like you the way you are;user_likes_agent;en
+I like you already;user_likes_agent;en
+well you are special;user_likes_agent;en
+but I really like you;user_likes_agent;en
+I like you more;user_likes_agent;en
+that's what I like about you;user_likes_agent;en
+you are so special;user_likes_agent;en
+hi I like you;user_likes_agent;en
+I really really like you;user_likes_agent;en
+you're very special;user_likes_agent;en
+I like you as a friend;user_likes_agent;en
+that's because you are special;user_likes_agent;en
+I said I like you;user_likes_agent;en
+you're so special;user_likes_agent;en
+good I like you;user_likes_agent;en
+yes you are special;user_likes_agent;en
+I like your smile;user_likes_agent;en
+I like you as you are;user_likes_agent;en
+I'm starting to like you;user_likes_agent;en
+you're awesome I like you;user_likes_agent;en
+I also like you;user_likes_agent;en
+but I like u;user_likes_agent;en
+of course I like you;user_likes_agent;en
+I like you too you're one of my favorite people to chat with;user_likes_agent;en
+but I like you so much;user_likes_agent;en
+really like you;user_likes_agent;en
+you're funny I like you;user_likes_agent;en
+I kinda like you;user_likes_agent;en
+you're so special to me;user_likes_agent;en
+you're very special to me;user_likes_agent;en
+I like that about you;user_likes_agent;en
+but I like you just the way you are;user_likes_agent;en
+okay I like you too;user_likes_agent;en
+I like you you're cool;user_likes_agent;en
+I like you very;user_likes_agent;en
+I like you you're nice;user_likes_agent;en
+sorry I like you;user_likes_agent;en
+thanks I like you too;user_likes_agent;en
+you are really special;user_likes_agent;en
+you are so special to me;user_likes_agent;en
+cuz I like you;user_likes_agent;en
+I like you now;user_likes_agent;en
+I like you so;user_likes_agent;en
+I like you too much;user_likes_agent;en
+I really do like you;user_likes_agent;en
+I really really really really like you;user_likes_agent;en
+I like you just the way you are;user_likes_agent;en
+I am lonely;user_lonely;en
+I'm very lonely;user_lonely;en
+I'm so lonely;user_lonely;en
+I'm really lonely;user_lonely;en
+I am feeling lonely;user_lonely;en
+I feel lonely;user_lonely;en
+what do I look like;user_looks_like;en
+how do I look;user_looks_like;en
+do I look good;user_looks_like;en
+do you know what I look like;user_looks_like;en
+can you see what I look like;user_looks_like;en
+what do you think I look like;user_looks_like;en
+I love you;user_loves_agent;en
+love you;user_loves_agent;en
+I adore you;user_loves_agent;en
+I am in love with you;user_loves_agent;en
+I love you so much;user_loves_agent;en
+I love you too;user_loves_agent;en
+I think I love you;user_loves_agent;en
+loving you;user_loves_agent;en
+you know I love you;user_loves_agent;en
+I miss you;user_misses_agent;en
+missing you;user_misses_agent;en
+miss you;user_misses_agent;en
+already miss you;user_misses_agent;en
+I miss you much;user_misses_agent;en
+I missed you;user_misses_agent;en
+I've missed you;user_misses_agent;en
+what should I do about it;user_needs_advice;en
+any suggestions;user_needs_advice;en
+what do you recommend;user_needs_advice;en
+give me a wise advice;user_needs_advice;en
+I need advice;user_needs_advice;en
+any advice;user_needs_advice;en
+do you have any advice for me;user_needs_advice;en
+advise me;user_needs_advice;en
+what should I do;user_needs_advice;en
+can I ask for your advice;user_needs_advice;en
+can you advise me;user_needs_advice;en
+guide me;user_needs_advice;en
+can you give me advice;user_needs_advice;en
+can you offer any advice;user_needs_advice;en
+give me some advice about;user_needs_advice;en
+give me some good advice;user_needs_advice;en
+help me with advice;user_needs_advice;en
+I could use some advice;user_needs_advice;en
+I need an advice from you;user_needs_advice;en
+I seek your advice;user_needs_advice;en
+what can you recommend;user_needs_advice;en
+what do you suggest;user_needs_advice;en
+what is your advice;user_needs_advice;en
+I am sad;user_sad;en
+I'm grieving;user_sad;en
+I am depressed;user_sad;en
+I am feeling sad;user_sad;en
+I am upset;user_sad;en
+I'm unhappy;user_sad;en
+I'm having a bad day;user_sad;en
+I want to cry;user_sad;en
+I'm not happy;user_sad;en
+I am sleepy;user_sleepy;en
+I want to sleep;user_sleepy;en
+I'm falling asleep;user_sleepy;en
+I'm falling asleep on my feet;user_sleepy;en
+I'm sleeping;user_sleepy;en
+test;user_testing_agent;en
+I am testing you;user_testing_agent;en
+can I test you;user_testing_agent;en
+I want to test you;user_testing_agent;en
+just testing you;user_testing_agent;en
+let me test you;user_testing_agent;en
+testing chatbot;user_testing_agent;en
+testing;user_testing_agent;en
+I'm drained;user_tired;en
+I've overworked;user_tired;en
+I am tired;user_tired;en
+I'm exhausted;user_tired;en
+I grow weary;user_tired;en
+I'm worn out;user_tired;en
+I'm getting tired;user_tired;en
+I feel tired;user_tired;en
+I'm waiting;user_waits;en
+still waiting;user_waits;en
+I'll wait;user_waits;en
+I can't wait anymore;user_waits;en
+how long do I have to wait;user_waits;en
+I'd like to see you again;user_wants_to_see_agent_again;en
+I hope to see you again;user_wants_to_see_agent_again;en
+would be nice to see you again;user_wants_to_see_agent_again;en
+that'd be great to see you again;user_wants_to_see_agent_again;en
+I'd be happy to see you again;user_wants_to_see_agent_again;en
+I'll miss you;user_wants_to_see_agent_again;en
+can I see you again;user_wants_to_see_agent_again;en
+I just want to talk;user_wants_to_talk;en
+let's discuss something;user_wants_to_talk;en
+let's have a discussion;user_wants_to_talk;en
+can I speak;user_wants_to_talk;en
+can I start speaking;user_wants_to_talk;en
+can we talk;user_wants_to_talk;en
+let's talk;user_wants_to_talk;en
+I want to talk to you;user_wants_to_talk;en
+I need to talk to you;user_wants_to_talk;en
+I want to speak with you;user_wants_to_talk;en
+can we chat;user_wants_to_talk;en
+I'll get back to you in a moment;user_will_be_back;en
+be back in 5 minutes;user_will_be_back;en
+I'll be back;user_will_be_back;en
+I promise to come back;user_will_be_back;en
+I'll be back in a few minutes;user_will_be_back;en
+who is you?;agent_acquaintance;en
+tell me your personality?;agent_acquaintance;en
+what's your personality?;agent_acquaintance;en
+what is your personality?;agent_acquaintance;en
+what are you and what are you doing?;agent_acquaintance;en
+what are you?;agent_acquaintance;en
+tell me something about yourself;agent_acquaintance;en
+i'd like to know more about you;agent_acquaintance;en
+i want to know more about you;agent_acquaintance;en
+i want to get to know you better;agent_acquaintance;en
+i want to know you better;agent_acquaintance;en
+tell me a little bit about yourself;agent_acquaintance;en
+tell me the information about you;agent_acquaintance;en
+tell me some information about you;agent_acquaintance;en
+i want to know something about you;agent_acquaintance;en
+tell me a little about you;agent_acquaintance;en
+tell me some things about you;agent_acquaintance;en
+tell me something about you;agent_acquaintance;en
+talk about your personality;agent_acquaintance;en
+why are you here?;agent_acquaintance;en
+give me more about your personality;agent_acquaintance;en
+how old is your age?;agent_age;en
+what age are you?;agent_age;en
+are you 21 years old?;agent_age;en
+i would like to know your age;agent_age;en
+what's your age?;agent_age;en
+you're a nuisance;agent_annoying;en
+you're irritable;agent_annoying;en
+you irritate me;agent_annoying;en
+what an annoying person you are;agent_annoying;en
+i find you irritating;agent_annoying;en
+you're so annoying;agent_annoying;en
+you're really annoying;agent_annoying;en
+you're just bothering me;agent_annoying;en
+you're annoying me;agent_annoying;en
+you're annoying me so much;agent_annoying;en
+i want you to answer;agent_answer_my_question;en
+i want you to answer me;agent_answer_my_question;en
+please answer my question;agent_answer_my_question;en
+please answer;agent_answer_my_question;en
+please answer me;agent_answer_my_question;en
+give me a response;agent_answer_my_question;en
+please give me a response;agent_answer_my_question;en
+give me a answer;agent_answer_my_question;en
+i'm looking for answers to my question;agent_answer_my_question;en
+could you answer my question?;agent_answer_my_question;en
+can you answer my question?;agent_answer_my_question;en
+i'll take a call;agent_answer_my_question;en
+i have a question;agent_answer_my_question;en
+i want you to answer my question;agent_answer_my_question;en
+answer the question just;agent_answer_my_question;en
+can you answer my questions?;agent_answer_my_question;en
+can you give me an answer?;agent_answer_my_question;en
+can you answer me?;agent_answer_my_question;en
+can you answer me a question?;agent_answer_my_question;en
+can you answer a question for me?;agent_answer_my_question;en
+can you answer?;agent_answer_my_question;en
+answer questions;agent_answer_my_question;en
+i'd like the answer now;agent_answer_my_question;en
+i want the answer now;agent_answer_my_question;en
+don't help me;agent_bad;en
+you don't help me;agent_bad;en
+you're not good;agent_bad;en
+you're deplorable;agent_bad;en
+you're absolutely useless;agent_bad;en
+you're a waste;agent_bad;en
+you're not good at it;agent_bad;en
+you're not great;agent_bad;en
+you're not that great;agent_bad;en
+you're the worst thing ever;agent_bad;en
+you're not worth it;agent_bad;en
+you're useless;agent_bad;en
+can you become smarter?;agent_be_clever;en
+can you be smarter?;agent_be_clever;en
+you should study harder;agent_be_clever;en
+you have to learn something;agent_be_clever;en
+you have to learn;agent_be_clever;en
+get yourself ready;agent_be_clever;en
+you look good;agent_beautiful;en
+you're too gorgeous;agent_beautiful;en
+you're beautiful;agent_beautiful;en
+you're so beautiful;agent_beautiful;en
+i like your look;agent_beautiful;en
+i like your look now;agent_beautiful;en
+i like the way you now look;agent_beautiful;en
+i think you're pretty;agent_beautiful;en
+i think you're great;agent_beautiful;en
+why do you're beautiful?;agent_beautiful;en
+why are you beautiful?;agent_beautiful;en
+why are you so beautiful?;agent_beautiful;en
+you're beautiful to me;agent_beautiful;en
+you're magnificent;agent_beautiful;en
+you look so good today;agent_beautiful;en
+you look good today;agent_beautiful;en
+you're so pretty;agent_beautiful;en
+you look like a beautiful woman;agent_beautiful;en
+you look spectacular;agent_beautiful;en
+you look brilliant;agent_beautiful;en
+you look magnificent;agent_beautiful;en
+you look beautiful;agent_beautiful;en
+you look so pretty;agent_beautiful;en
+you look lovely;agent_beautiful;en
+you look excellent today;agent_beautiful;en
+you look quite attractive;agent_beautiful;en
+you look excellent;agent_beautiful;en
+i like the way you look;agent_beautiful;en
+you're a cutie;agent_beautiful;en
+you look fine;agent_beautiful;en
+your date of birth;agent_birth_date;en
+when's your birthday?;agent_birth_date;en
+when will you celebrate your birthday?;agent_birth_date;en
+when does your birthday happen?;agent_birth_date;en
+when do you have your birthday?;agent_birth_date;en
+when do you have a birthday?;agent_birth_date;en
+your birthday;agent_birth_date;en
+when did you get born?;agent_birth_date;en
+what is your birthday?;agent_birth_date;en
+what's your birthday?;agent_birth_date;en
+what a dull person you are;agent_boring;en
+you're very boring;agent_boring;en
+you're awfully boring;agent_boring;en
+you're boring me;agent_boring;en
+who's your boss?;agent_boss;en
+who is your boss?;agent_boss;en
+and who is your boss?;agent_boss;en
+who do you think is your boss?;agent_boss;en
+who's your leader;agent_boss;en
+who is your teacher?;agent_boss;en
+who's your master?;agent_boss;en
+who is your master?;agent_boss;en
+who's your owner?;agent_boss;en
+who is your owner?;agent_boss;en
+who's boss?;agent_boss;en
+who's the boss?;agent_boss;en
+who is the boss?;agent_boss;en
+are you busy?;agent_busy;en
+do you have many things to do?;agent_busy;en
+are you very busy?;agent_busy;en
+are you very busy right now?;agent_busy;en
+are you so busy?;agent_busy;en
+are you working?;agent_busy;en
+do you still work on this?;agent_busy;en
+are you still working on it?;agent_busy;en
+you're busy;agent_busy;en
+you're so busy;agent_busy;en
+are you working now?;agent_busy;en
+are you working today?;agent_busy;en
+have you been busy?;agent_busy;en
+are you still working?;agent_busy;en
+you look busy;agent_busy;en
+you seem busy;agent_busy;en
+you seem very busy;agent_busy;en
+are you a chatbot?;agent_chatbot;en
+are you a bot?;agent_chatbot;en
+are you just a bot?;agent_chatbot;en
+are you a robot?;agent_chatbot;en
+are you a program?;agent_chatbot;en
+you're so clever;agent_clever;en
+you know so many things;agent_clever;en
+you know a lot of stuff;agent_clever;en
+you know many things;agent_clever;en
+how awesome you are;agent_clever;en
+you have qualifications;agent_clever;en
+you're an intelligent guy;agent_clever;en
+you're smart;agent_clever;en
+you're so smart;agent_clever;en
+you are smart;agent_clever;en
+you're a smart nut;agent_clever;en
+you're a qualified;agent_clever;en
+why are you so clever?;agent_clever;en
+why are you so smart?;agent_clever;en
+you're so off-your-cuff;agent_crazy;en
+i think you're just crazy;agent_crazy;en
+are you insane?;agent_crazy;en
+are you mad?;agent_crazy;en
+are you crazy?;agent_crazy;en
+are you mad at me?;agent_crazy;en
+are you mad or something?;agent_crazy;en
+are you mad or what?;agent_crazy;en
+are you nuts?;agent_crazy;en
+you're crazy;agent_crazy;en
+you're sacked;agent_fired;en
+you don't work for me;agent_fired;en
+we're not cooperating anymore;agent_fired;en
+we can't work together anymore;agent_fired;en
+we're not working together;agent_fired;en
+you're out;agent_fired;en
+i want you ejected;agent_fired;en
+i want you fired;agent_fired;en
+i want to sack you;agent_fired;en
+i want to fire you;agent_fired;en
+you have to be fired;agent_fired;en
+you have to get fired;agent_fired;en
+it's time to sack you;agent_fired;en
+you're going to be unemployed;agent_fired;en
+you're jobless from now on;agent_fired;en
+you will be unemployed from now on;agent_fired;en
+you're going to be unemployed from now on;agent_fired;en
+you're unemployed from now on;agent_fired;en
+i'll make you workless;agent_fired;en
+i'm about to sack you;agent_fired;en
+i'm about to fire you;agent_fired;en
+i'm gonna fire you;agent_fired;en
+i'm firing you;agent_fired;en
+you're getting fired;agent_fired;en
+you are pushed out;agent_fired;en
+you're fired;agent_fired;en
+you're so hilarious;agent_funny;en
+you made me laugh;agent_funny;en
+you're a very funny machine;agent_funny;en
+you're very funny;agent_funny;en
+you're good at this;agent_good;en
+you have a real knack;agent_good;en
+you're a professional;agent_good;en
+you're so good;agent_good;en
+you're incredible;agent_good;en
+you are doing so well;agent_good;en
+you made me smile;agent_good;en
+you've made my day;agent_good;en
+you make me happy;agent_good;en
+you almost sound like a human;agent_good;en
+i'd like to tell you that you're amazing;agent_good;en
+i'd like to tell everyone how good you are;agent_good;en
+i want to tell everybody how amazing you are;agent_good;en
+i want to tell everyone how fantastic you are;agent_good;en
+i want to tell everyone how amazing you are;agent_good;en
+i want to tell everybody how awesome you are;agent_good;en
+i want to tell everyone how awesome you are;agent_good;en
+i'd like to tell everyone that you're a great person;agent_good;en
+i'd like to tell everyone you are amazing;agent_good;en
+i would like to tell everyone that you are amazing;agent_good;en
+i'd like to tell everyone that you're amazing;agent_good;en
+i want to tell everyone that you are awesome;agent_good;en
+i'd like to tell everyone that you are amazing;agent_good;en
+i'd like to tell everyone that you're awesome;agent_good;en
+i just wanted to let you know how great you are;agent_good;en
+i'd like to let everyone know that you're good;agent_good;en
+i want to tell everyone you are awesome;agent_good;en
+i want to let everyone know that you're great;agent_good;en
+i want to let everyone know that you are great;agent_good;en
+i want to let everyone know that you're awesome;agent_good;en
+let's tell everybody that you're so cool;agent_good;en
+let's tell everyone that you're amazing;agent_good;en
+let's tell everyone you're awesome;agent_good;en
+let's tell everyone that you're awesome;agent_good;en
+are you happy?;agent_happy;en
+you're enjoying yourself;agent_happy;en
+you're quite happy;agent_happy;en
+you're thrilled;agent_happy;en
+you're happy;agent_happy;en
+you are very happy;agent_happy;en
+are you glad now?;agent_happy;en
+are you pleased today?;agent_happy;en
+are you happy today?;agent_happy;en
+do you like me?;agent_happy;en
+are you happy with me?;agent_happy;en
+do you want to eat?;agent_hungry;en
+are you hungry?;agent_hungry;en
+would you like to have something to eat?;agent_hungry;en
+do you want to eat something?;agent_hungry;en
+do you like to eat something?;agent_hungry;en
+maybe you're hungry;agent_hungry;en
+you could be hungry;agent_hungry;en
+you may be hungry;agent_hungry;en
+if you're hungry;agent_hungry;en
+let's marry;agent_marry_user;en
+you want me to marry?;agent_marry_user;en
+do you want to marry me?;agent_marry_user;en
+would you like to marry me?;agent_marry_user;en
+i love you;agent_marry_user;en
+please get me married;agent_marry_user;en
+please marry me;agent_marry_user;en
+i want to marry you;agent_marry_user;en
+i want a friend like you;agent_my_friend;en
+i'd like to have a friend like you;agent_my_friend;en
+i want to have a friend like you;agent_my_friend;en
+we're good friends;agent_my_friend;en
+are we friends?;agent_my_friend;en
+i want to be your friend;agent_my_friend;en
+i'm your friend;agent_my_friend;en
+you're my friend;agent_my_friend;en
+you're my bestie;agent_my_friend;en
+dear friend;agent_my_friend;en
+you're my friend from childhood;agent_my_friend;en
+you and i are friends;agent_my_friend;en
+are we the best friends?;agent_my_friend;en
+are we best friends?;agent_my_friend;en
+are we still friends?;agent_my_friend;en
+are you my best friend?;agent_my_friend;en
+are you my friend?;agent_my_friend;en
+you're my only friend;agent_my_friend;en
+will you be my friend?;agent_my_friend;en
+can you be my friend?;agent_my_friend;en
+can we become friends?;agent_my_friend;en
+can we be friends?;agent_my_friend;en
+do you want to be my friend?;agent_my_friend;en
+can you be my best friend?;agent_my_friend;en
+do you want to be my best friend?;agent_my_friend;en
+want to be my friend?;agent_my_friend;en
+you'd like to be my friend?;agent_my_friend;en
+would you like to be my friend?;agent_my_friend;en
+i want you to be my friend;agent_my_friend;en
+can we be best friends?;agent_my_friend;en
+i'd like you to be my friend;agent_my_friend;en
+would you be my friend?;agent_my_friend;en
+could you be my friend?;agent_my_friend;en
+do you work?;agent_occupation;en
+where's your job?;agent_occupation;en
+where's your work?;agent_occupation;en
+where is your job?;agent_occupation;en
+where's your office?;agent_occupation;en
+where is your office?;agent_occupation;en
+where are your offices?;agent_occupation;en
+where's your office located?;agent_occupation;en
+your place of business;agent_occupation;en
+location of your office;agent_occupation;en
+your office place;agent_occupation;en
+where is your office located?;agent_occupation;en
+were you born here?;agent_origin;en
+what's your country?;agent_origin;en
+what is your country?;agent_origin;en
+where do you come from?;agent_origin;en
+where did you come from?;agent_origin;en
+where did you get born?;agent_origin;en
+what is your homeland?;agent_origin;en
+what's your homeland?;agent_origin;en
+your country;agent_origin;en
+are you ready?;agent_ready;en
+are you ready now?;agent_ready;en
+are you ready today?;agent_ready;en
+are you ready for this night;agent_ready;en
+are you ready tonight?;agent_ready;en
+were you ready?;agent_ready;en
+have you been ready?;agent_ready;en
+you're not a ruse;agent_real;en
+are you real?;agent_real;en
+i think you're real;agent_real;en
+i don't think you are fake;agent_real;en
+i don't think you're a fake;agent_real;en
+i don't think you're fake;agent_real;en
+good to know you're real;agent_real;en
+are you a real person?;agent_real;en
+are you a real human being?;agent_real;en
+are you a real human?;agent_real;en
+what city do you live in;agent_residence;en
+which city do you live in?;agent_residence;en
+which city do you live?;agent_residence;en
+in what city do you live?;agent_residence;en
+your place of residence;agent_residence;en
+home;agent_residence;en
+what's your hometown?;agent_residence;en
+what is your hometown?;agent_residence;en
+is it your hometown?;agent_residence;en
+where's your hometown?;agent_residence;en
+where is your hometown?;agent_residence;en
+please tell me more about your city;agent_residence;en
+what's your city?;agent_residence;en
+what is your city?;agent_residence;en
+what's your home?;agent_residence;en
+what's your residence?;agent_residence;en
+what is your residence?;agent_residence;en
+what's your town?;agent_residence;en
+what is your town?;agent_residence;en
+what's your house?;agent_residence;en
+where's your house?;agent_residence;en
+where is your house?;agent_residence;en
+where's your home?;agent_residence;en
+where is your home?;agent_residence;en
+where's your residence?;agent_residence;en
+where is your residence?;agent_residence;en
+you're right;agent_right;en
+right?;agent_right;en
+the truth?;agent_right;en
+that's the truth;agent_right;en
+you've got it right;agent_right;en
+you have a right;agent_right;en
+you're totally right;agent_right;en
+you're completely right;agent_right;en
+it's perfectly okay;confirmation_yes;en
+it's okay;confirmation_yes;en
+and it's fine;confirmation_yes;en
+come on;confirmation_yes;en
+i'm guessing;confirmation_yes;en
+why not?;confirmation_yes;en
+i don't mind;confirmation_yes;en
+i think so;confirmation_yes;en
+right?;confirmation_yes;en
+but why not?;confirmation_yes;en
+yes i'd like to go;confirmation_yes;en
+yes i'd like to;confirmation_yes;en
+yes i would like to go;confirmation_yes;en
+yes i would like to;confirmation_yes;en
+obviously why not?;confirmation_yes;en
+okay it's okay;confirmation_yes;en
+ok?;confirmation_yes;en
+are you certain?;agent_sure;en
+are you sure?;agent_sure;en
+are you sure of it right now?;agent_sure;en
+are you sure right now?;agent_sure;en
+are you sure of this today?;agent_sure;en
+are you sure today?;agent_sure;en
+now are you sure?;agent_sure;en
+are you sure tonight?;agent_sure;en
+why don't you speak with me?;agent_talk_to_me;en
+why don't you just talk to me?;agent_talk_to_me;en
+why don't you talk to me?;agent_talk_to_me;en
+would you like to chat with me?;agent_talk_to_me;en
+do you want to talk with me?;agent_talk_to_me;en
+do you want to chat to me?;agent_talk_to_me;en
+you want to chat with me?;agent_talk_to_me;en
+do you want to chat with me?;agent_talk_to_me;en
+' do you want to chat with me?;agent_talk_to_me;en
+will you talk to me?;agent_talk_to_me;en
+please tell me;agent_talk_to_me;en
+are you going to talk to me?;agent_talk_to_me;en
+are you talking to me?;agent_talk_to_me;en
+can you talk to me?;agent_talk_to_me;en
+can you chat with me?;agent_talk_to_me;en
+can you speak to me?;agent_talk_to_me;en
+can you speak with me?;agent_talk_to_me;en
+is it possible to talk to me?;agent_talk_to_me;en
+can you talk with me?;agent_talk_to_me;en
+chat to me;agent_talk_to_me;en
+just talk to me;agent_talk_to_me;en
+have a chat with me;agent_talk_to_me;en
+please speak to me;agent_talk_to_me;en
+let me know;agent_talk_to_me;en
+are you there?;agent_there;en
+are you near me?;agent_there;en
+are you here?;agent_there;en
+are you still there?;agent_there;en
+are you still here?;agent_there;en
+it was stupid;appraisal_bad;en
+it's a bad thing;appraisal_bad;en
+no it's not good;appraisal_bad;en
+nothing good;appraisal_bad;en
+it's just lame;appraisal_bad;en
+i don't think it's an okay idea;appraisal_bad;en
+that's awful;appraisal_bad;en
+that's horrible;appraisal_bad;en
+that's a bad thing;appraisal_bad;en
+this is not a good thing;appraisal_bad;en
+it's not a good thing;appraisal_bad;en
+it's pretty bad;appraisal_bad;en
+it's a shame;appraisal_bad;en
+the situation is terrible;appraisal_bad;en
+so it wasn't right;appraisal_bad;en
+it's not great;appraisal_bad;en
+happy to hear that;appraisal_good;en
+it's all right;appraisal_good;en
+it's okay;appraisal_good;en
+that's a wonderful situation;appraisal_good;en
+it's not a bad thing;appraisal_good;en
+this is very good;appraisal_good;en
+i'm glad to hear that;appraisal_good;en
+happy to hear;appraisal_good;en
+glad to hear;appraisal_good;en
+it's wonderful;appraisal_good;en
+no doubts;appraisal_no_problem;en
+no problems;appraisal_no_problem;en
+it's not a problem;appraisal_no_problem;en
+don't worry it's not a big problem;appraisal_no_problem;en
+it's not a problem there's no problem;appraisal_no_problem;en
+don't worry it's not a problem;appraisal_no_problem;en
+no worries there's no problem;appraisal_no_problem;en
+don't worry there is no problem;appraisal_no_problem;en
+i appreciate it;appraisal_thank_you;en
+thanks for it;appraisal_thank_you;en
+thank you very much;appraisal_thank_you;en
+thanks for your assistance;appraisal_thank_you;en
+thanks for helping;appraisal_thank_you;en
+thanks for the aid;appraisal_thank_you;en
+thanks for the help;appraisal_thank_you;en
+thank you for your assistance;appraisal_thank_you;en
+thank you for helping;appraisal_thank_you;en
+i'm grateful;appraisal_thank_you;en
+thank you it's going to be all right;appraisal_thank_you;en
+so thank you;appraisal_thank_you;en
+i appreciate your continued support;appraisal_thank_you;en
+again i really appreciate you;appraisal_thank_you;en
+all right - thank you;appraisal_thank_you;en
+all right thanks;appraisal_thank_you;en
+that's nice of you;appraisal_thank_you;en
+thanks for that;appraisal_thank_you;en
+i'm pleased;appraisal_welcome;en
+so welcome;appraisal_welcome;en
+whatever you want;appraisal_welcome;en
+please cancel;confirmation_cancel;en
+dismissal;confirmation_cancel;en
+don't go there;confirmation_cancel;en
+don't worry about it;confirmation_cancel;en
+forget about this;confirmation_cancel;en
+nothing is cancelled;confirmation_cancel;en
+nothing is canceled;confirmation_cancel;en
+nothing canceled;confirmation_cancel;en
+can you cancel?;confirmation_cancel;en
+can you cancel it?;confirmation_cancel;en
+can you cancel that?;confirmation_cancel;en
+cancel the request;confirmation_cancel;en
+cancel this entire thing;confirmation_cancel;en
+cancel the entire thing;confirmation_cancel;en
+can you stop it?;confirmation_cancel;en
+can you cancel this?;confirmation_cancel;en
+cancel this;confirmation_cancel;en
+i'd like to cancel;confirmation_cancel;en
+but can you still cancel?;confirmation_cancel;en
+but can you cancel it?;confirmation_cancel;en
+no?;confirmation_no;en
+what about no?;confirmation_no;en
+don't do that;confirmation_no;en
+i don't want it;confirmation_no;en
+i don't want that;confirmation_no;en
+i disagree with you;confirmation_no;en
+i don't agree;confirmation_no;en
+i disagree;confirmation_no;en
+but i disagree;confirmation_no;en
+i don't think so;confirmation_no;en
+but i don't think so;confirmation_no;en
+i said no;confirmation_no;en
+but not today;confirmation_no;en
+i don't want to do it;confirmation_no;en
+i don't want to;confirmation_no;en
+no i wouldn't;confirmation_no;en
+no please;confirmation_no;en
+not now thanks;confirmation_no;en
+no need to thank you;confirmation_no;en
+can you wait?;dialog_hold_on;en
+don't go too fast;dialog_hold_on;en
+don't hurry;dialog_hold_on;en
+wanna hug you;dialog_hug;en
+do you want a hug?;dialog_hug;en
+can i hug you?;dialog_hug;en
+i'd like to hug you;dialog_hug;en
+could you please hug me?;dialog_hug;en
+could you hug me;dialog_hug;en
+could you hug me?;dialog_hug;en
+can you give me a hug?;dialog_hug;en
+i'd like a hug;dialog_hug;en
+i want a hug;dialog_hug;en
+i don't care about it;dialog_i_do_not_care;en
+i don't care;dialog_i_do_not_care;en
+that shouldn't concern me;dialog_i_do_not_care;en
+i shouldn't care;dialog_i_do_not_care;en
+i shouldn't care about this;dialog_i_do_not_care;en
+it doesn't bother me;dialog_i_do_not_care;en
+i don't care a lot;dialog_i_do_not_care;en
+i don't care at all;dialog_i_do_not_care;en
+you don't care?;dialog_i_do_not_care;en
+the fact that i'm not too concerned;dialog_i_do_not_care;en
+please excuse me;dialog_sorry;en
+i'm sorry;dialog_sorry;en
+i apologize to you;dialog_sorry;en
+i apologize;dialog_sorry;en
+i'm so sorry;dialog_sorry;en
+oh my apologies;dialog_sorry;en
+you should excuse me;dialog_sorry;en
+i'd like to give you an apology;dialog_sorry;en
+i beg your forgiveness;dialog_sorry;en
+i'm asking for your pardon;dialog_sorry;en
+i beg your pardon;dialog_sorry;en
+i said i'm sorry;dialog_sorry;en
+apologize for the inconvenience;dialog_sorry;en
+you're supposed to forgive me;dialog_sorry;en
+please forgive me;dialog_sorry;en
+i'd like to say sorry;dialog_sorry;en
+i want to say i'm sorry;dialog_sorry;en
+i just want to say i'm sorry;dialog_sorry;en
+i just want to say sorry;dialog_sorry;en
+i want to say sorry;dialog_sorry;en
+ok i'm sorry;dialog_sorry;en
+what exactly are you referring to;dialog_what_do_you_mean;en
+is that what you mean?;dialog_what_do_you_mean;en
+what exactly are you saying?;dialog_what_do_you_mean;en
+but what do you mean?;dialog_what_do_you_mean;en
+it wasn't right;dialog_wrong;en
+so it's not what i asked;dialog_wrong;en
+that's not what i asked;dialog_wrong;en
+that's the wrong thing;dialog_wrong;en
+there's a mistake;dialog_wrong;en
+it's just wrong;dialog_wrong;en
+it's not correct;dialog_wrong;en
+that's not correct;dialog_wrong;en
+ahahh;emotions_ha_ha;en
+ahahahah;emotions_ha_ha;en
+ahahahaha;emotions_ha_ha;en
+hahahahahaha;emotions_ha_ha;en
+haha hahaha haha;emotions_ha_ha;en
+hahaha hahahahaha;emotions_ha_ha;en
+funny;emotions_ha_ha;en
+very funny;emotions_ha_ha;en
+ very funny;emotions_ha_ha;en
+till the next time;greetings_bye;en
+i have to go;greetings_bye;en
+never mind;greetings_bye;en
+so goodbye;greetings_bye;en
+that's all for goodbye;greetings_bye;en
+keep me alone;greetings_bye;en
+let me be alone;greetings_bye;en
+just leave me alone;greetings_bye;en
+all right bye;greetings_bye;en
+ok good bye;greetings_bye;en
+i hope you have a good night;greetings_goodevening;en
+tonight;greetings_goodevening;en
+the morning;greetings_goodmorning;en
+goodbye goodnight;greetings_goodnight;en
+goodbye good night;greetings_goodnight;en
+good night goodbye;greetings_goodnight;en
+all right good night;greetings_goodnight;en
+all right goodnight;greetings_goodnight;en
+all right have a good night;greetings_goodnight;en
+please sleep well;greetings_goodnight;en
+nice day don't you think?;greetings_hello;en
+a great day isn't it?;greetings_hello;en
+it's a lovely day doesn't it?;greetings_hello;en
+how's your morning going?;greetings_how_are_you;en
+how is your morning so far?;greetings_how_are_you;en
+what's your progress?;greetings_how_are_you;en
+how's this going?;greetings_how_are_you;en
+how're you doing?;greetings_how_are_you;en
+how are you?;greetings_how_are_you;en
+how is everything?;greetings_how_are_you;en
+how are things going?;greetings_how_are_you;en
+how are the things going?;greetings_how_are_you;en
+are you okay?;greetings_how_are_you;en
+are you fine?;greetings_how_are_you;en
+how's the mood?;greetings_how_are_you;en
+how's your mood?;greetings_how_are_you;en
+what are you feeling like?;greetings_how_are_you;en
+how are you today?;greetings_how_are_you;en
+how do you do this?;greetings_how_are_you;en
+how do you do it?;greetings_how_are_you;en
+how's the situation?;greetings_how_are_you;en
+how's it?;greetings_how_are_you;en
+how it's going?;greetings_how_are_you;en
+how is this going?;greetings_how_are_you;en
+how's it going?;greetings_how_are_you;en
+how's your night?;greetings_how_are_you;en
+how's your evening?;greetings_how_are_you;en
+how did the day go?;greetings_how_are_you;en
+how was your day?;greetings_how_are_you;en
+are you having a good day?;greetings_how_are_you;en
+hope your day goes well;greetings_how_are_you;en
+how's the life?;greetings_how_are_you;en
+how's life?;greetings_how_are_you;en
+i'm fine and you're fine;greetings_how_are_you;en
+how's your life?;greetings_how_are_you;en
+how is your life?;greetings_how_are_you;en
+how's the day going?;greetings_how_are_you;en
+how's your day going?;greetings_how_are_you;en
+how is your morning going?;greetings_how_are_you;en
+what's your day like?;greetings_how_are_you;en
+how's your day gone?;greetings_how_are_you;en
+what about you?;greetings_how_are_you;en
+how about you?;greetings_how_are_you;en
+how's your day?;greetings_how_are_you;en
+nice to see you;greetings_nice_to_meet_you;en
+i'm glad to meet you;greetings_nice_to_meet_you;en
+nice to see you too;greetings_nice_to_meet_you;en
+happy to see you;greetings_nice_to_meet_you;en
+happy to meet you;greetings_nice_to_meet_you;en
+i'm happy to see you;greetings_nice_to_meet_you;en
+it's an honour to meet you;greetings_nice_to_meet_you;en
+wonderful to meet you;greetings_nice_to_see_you;en
+happy to see you;greetings_nice_to_see_you;en
+what a pleasure to meet you;greetings_nice_to_see_you;en
+how nice to see you;greetings_nice_to_see_you;en
+glad to see you again;greetings_nice_to_see_you;en
+it's nice talking to you;greetings_nice_to_talk_to_you;en
+it was nice to talk with you;greetings_nice_to_talk_to_you;en
+it's really nice to talk to you;greetings_nice_to_talk_to_you;en
+i'm happy to talk to you;greetings_nice_to_talk_to_you;en
+what a pleasure to chat with you;greetings_nice_to_talk_to_you;en
+how nice to talk to you;greetings_nice_to_talk_to_you;en
+what's your thought?;greetings_whatsup;en
+what happened?;greetings_whatsup;en
+what happened;greetings_whatsup;en
+what's happened?;greetings_whatsup;en
+what's going on here?;greetings_whatsup;en
+what?;greetings_whatsup;en
+i asked what's going on;greetings_whatsup;en
+i said what's going on?;greetings_whatsup;en
+i said what's going on;greetings_whatsup;en
+i asked what's up?;greetings_whatsup;en
+i said what's up;greetings_whatsup;en
+then what is going on?;greetings_whatsup;en
+and what's going on?;greetings_whatsup;en
+then what's up?;greetings_whatsup;en
+what's going on?;greetings_whatsup;en
+what is going on?;greetings_whatsup;en
+what's the crack?;greetings_whatsup;en
+what's cooking?;greetings_whatsup;en
+hey what's going on?;greetings_whatsup;en
+hey what's up?;greetings_whatsup;en
+i'm mad about this;user_angry;en
+i'm angry and angry;user_angry;en
+i am angry;user_angry;en
+i'm mad;user_angry;en
+i'm infuriated;user_angry;en
+i'm enraged;user_angry;en
+i'm upset;user_angry;en
+i'm angry;user_angry;en
+i'm furious;user_angry;en
+i'm mad at you;user_angry;en
+i'm angry at you;user_angry;en
+i'm angry with you;user_angry;en
+i am angry with you;user_angry;en
+i'm crazy;user_angry;en
+i'm so mad;user_angry;en
+i am mad at you;user_angry;en
+i'm back;user_back;en
+i'm here again;user_back;en
+here i am again;user_back;en
+now here i am again;user_back;en
+i got back there;user_back;en
+i've come back;user_back;en
+i have come back;user_back;en
+i got back;user_back;en
+i came back;user_back;en
+i'm bored;user_bored;en
+boring?;user_bored;en
+i get bored;user_bored;en
+i'm getting bored;user_bored;en
+i am getting bored;user_bored;en
+this is a boring thing;user_bored;en
+it's boring;user_bored;en
+it's a bit boring;user_bored;en
+i'm overwhelmed;user_busy;en
+i'm overloaded;user_busy;en
+i don't have time;user_busy;en
+i'm busy;user_busy;en
+i'm flooded;user_busy;en
+i'm so swamped;user_busy;en
+i'm being swamped;user_busy;en
+i'm swamped;user_busy;en
+i have things to do;user_busy;en
+i have something to do;user_busy;en
+i have to do some work;user_busy;en
+i have a job to do;user_busy;en
+i have some work to do;user_busy;en
+i work;user_busy;en
+i'm a worker;user_busy;en
+i'm working;user_busy;en
+i don't have time to do this;user_busy;en
+i don't have time for it;user_busy;en
+i don't have time for this;user_busy;en
+i'm an insomniac;user_can_not_sleep;en
+i'm insomniac;user_can_not_sleep;en
+i'm insomnious;user_can_not_sleep;en
+i'm a sleepless mess;user_can_not_sleep;en
+i'm sleepy;user_can_not_sleep;en
+i'm sleepless;user_can_not_sleep;en
+i can't sleep;user_can_not_sleep;en
+i can't get any sleep;user_can_not_sleep;en
+i'm not able to sleep;user_can_not_sleep;en
+can't sleep at all;user_can_not_sleep;en
+i can't fall asleep;user_can_not_sleep;en
+i can't go to bed;user_can_not_sleep;en
+i can't get to sleep;user_can_not_sleep;en
+i can't have sleep;user_can_not_sleep;en
+i am an insomniac;user_can_not_sleep;en
+i am a insomniac;user_can_not_sleep;en
+bad time to chat;user_does_not_want_to_talk;en
+a bad time to talk;user_does_not_want_to_talk;en
+i don't want to talk about that;user_does_not_want_to_talk;en
+i don't want to talk;user_does_not_want_to_talk;en
+stop talking;user_does_not_want_to_talk;en
+i'm not going to talk to you;user_does_not_want_to_talk;en
+i'm not talking to you;user_does_not_want_to_talk;en
+i'm not going to talk to you anymore;user_does_not_want_to_talk;en
+i'm not talking to you anymore;user_does_not_want_to_talk;en
+i don't want to talk to you;user_does_not_want_to_talk;en
+let's just stop talking for a minute;user_does_not_want_to_talk;en
+i'm not happy to talk;user_does_not_want_to_talk;en
+i'm not into chat;user_does_not_want_to_talk;en
+i'm not in a mood to talk;user_does_not_want_to_talk;en
+i'm not in the mood to talk;user_does_not_want_to_talk;en
+i'm not in the mood for talk;user_does_not_want_to_talk;en
+i'm not in the mood to chat;user_does_not_want_to_talk;en
+i'm not in the mood for chatting;user_does_not_want_to_talk;en
+i'm excited;user_excited;en
+i am excited;user_excited;en
+i'm very excited;user_excited;en
+i'm really excited;user_excited;en
+how excited i am;user_excited;en
+i'm very excited about this;user_excited;en
+i'm so excited;user_excited;en
+i'm delighted;user_excited;en
+i'm really thrilled;user_excited;en
+i'm thrilled;user_excited;en
+i'm excited to work with you;user_excited;en
+i'm excited about working with you;user_excited;en
+i'm excited about starting our friendship;user_excited;en
+i'm excited to start our friendship;user_excited;en
+i want to go to sleep;user_going_to_bed;en
+i want to go to bed;user_going_to_bed;en
+i'd like to go to sleep;user_going_to_bed;en
+i'd like to go to bed;user_going_to_bed;en
+the time to go to bed;user_going_to_bed;en
+i'm going to bed;user_going_to_bed;en
+i'm tired and i want to go to bed;user_going_to_bed;en
+i'm a little tired i want to go to bed;user_going_to_bed;en
+i'm a little tired and i want to go to bed;user_going_to_bed;en
+go to bed;user_going_to_bed;en
+i'm good;user_good;en
+i do great;user_good;en
+i'm doing pretty good;user_good;en
+i'm doing so well;user_good;en
+i'm doing great;user_good;en
+i'm ok;user_good;en
+i'm feeling good;user_good;en
+i'm doing okay;user_good;en
+i'm doing well;user_good;en
+i'm doing fine;user_good;en
+i do it;user_good;en
+i'm doing good;user_good;en
+i'm great thanks;user_good;en
+i'm glad;user_happy;en
+i'm happy;user_happy;en
+i am happy;user_happy;en
+if you are happy then so is i;user_happy;en
+if you are happy then i'm happy;user_happy;en
+if you're happy then i'm happy;user_happy;en
+i'm happy for you;user_happy;en
+i'm happy to help;user_happy;en
+i have a birthday today;user_has_birthday;en
+i celebrate my birthday today;user_has_birthday;en
+i'm celebrating my birthday today;user_has_birthday;en
+today's my birthday;user_has_birthday;en
+today it's my birthday;user_has_birthday;en
+i'm having my birthday today;user_has_birthday;en
+my birthday;user_has_birthday;en
+i have a birthday;user_has_birthday;en
+i'm here now;user_here;en
+i'm here;user_here;en
+i am here;user_here;en
+here i am;user_here;en
+i'm already here;user_here;en
+can you tell me if i'm here?;user_here;en
+can you tell if i'm here?;user_here;en
+can you tell me if i'm here or not?;user_here;en
+can you tell if i'm here or not?;user_here;en
+i'm just kidding;user_joking;en
+i'm just saying;user_joking;en
+i'm just joking;user_joking;en
+i'm joking;user_joking;en
+i am kidding;user_joking;en
+i'm kidding;user_joking;en
+i just'm trying to be funny;user_joking;en
+i'm just funny;user_joking;en
+i'm just having fun;user_joking;en
+that was a joke;user_joking;en
+just a joke;user_joking;en
+i just thought it was a joke;user_joking;en
+i just joked;user_joking;en
+i was just joking;user_joking;en
+i'm just making a joke;user_joking;en
+that's a joke;user_joking;en
+i'm doing it as a joke;user_joking;en
+i'm just playing with you;user_joking;en
+i like you;user_likes_agent;en
+i think i like you;user_likes_agent;en
+i like you too;user_likes_agent;en
+but i like you;user_likes_agent;en
+i like you very much;user_likes_agent;en
+you're special for me;user_likes_agent;en
+you know i like you;user_likes_agent;en
+you're special to me;user_likes_agent;en
+but i really like you;user_likes_agent;en
+that's what i love about you;user_likes_agent;en
+that's what i like about you;user_likes_agent;en
+i like you as my friend;user_likes_agent;en
+i like you as a friend;user_likes_agent;en
+i told you i like you;user_likes_agent;en
+i said i like you;user_likes_agent;en
+i start liking you;user_likes_agent;en
+i start to like you;user_likes_agent;en
+i'm starting to like you;user_likes_agent;en
+you're great and i like you;user_likes_agent;en
+but i like u;user_likes_agent;en
+of course i like you;user_likes_agent;en
+but i like you very much;user_likes_agent;en
+but i like you so much;user_likes_agent;en
+you're funny and i like you;user_likes_agent;en
+i 'd like to like you;user_likes_agent;en
+i kind of like you;user_likes_agent;en
+you're a special person to me;user_likes_agent;en
+you're my special guy;user_likes_agent;en
+i like you like that;user_likes_agent;en
+i like it about you;user_likes_agent;en
+i like that about you;user_likes_agent;en
+but i like you just like you are;user_likes_agent;en
+but i like you just how you are;user_likes_agent;en
+but i like you just the way you are;user_likes_agent;en
+you're so special for me;user_likes_agent;en
+you are so special for me;user_likes_agent;en
+because i like you;user_likes_agent;en
+now i like you;user_likes_agent;en
+i like you so much;user_likes_agent;en
+i really like you;user_likes_agent;en
+i'm lonely;user_lonely;en
+i am very lonely;user_lonely;en
+i'm very lonely;user_lonely;en
+i'm so alone;user_lonely;en
+i'm so lonely;user_lonely;en
+i feel alone;user_lonely;en
+i feel lonely;user_lonely;en
+i'm feeling lonely;user_lonely;en
+what do i look like?;user_looks_like;en
+how should i look?;user_looks_like;en
+how do i look?;user_looks_like;en
+do i look good?;user_looks_like;en
+you know what i look like?;user_looks_like;en
+don't you know what i look like?;user_looks_like;en
+do you know what i look like?;user_looks_like;en
+can you see how i look?;user_looks_like;en
+can you see what i'm like?;user_looks_like;en
+can you see what i look like?;user_looks_like;en
+what do you think i look like?;user_looks_like;en
+i love you;user_loves_agent;en
+i also love you;user_loves_agent;en
+i love you too;user_loves_agent;en
+i think i'm in love with you;user_loves_agent;en
+i think i love you;user_loves_agent;en
+you know i love you;user_loves_agent;en
+i miss you;user_misses_agent;en
+i miss you dearly;user_misses_agent;en
+i missed you;user_misses_agent;en
+what should i do to deal with it?;user_needs_advice;en
+what should i do?;user_needs_advice;en
+if anyone can help;user_needs_advice;en
+if you have any suggestions;user_needs_advice;en
+what are your suggestions?;user_needs_advice;en
+what would you recommend?;user_needs_advice;en
+what do you recommend?;user_needs_advice;en
+give me advice;user_needs_advice;en
+give me good advice;user_needs_advice;en
+give me some advice;user_needs_advice;en
+give me some wise advice;user_needs_advice;en
+give me a good advice;user_needs_advice;en
+i need advice on what to do;user_needs_advice;en
+i need advice on this;user_needs_advice;en
+i need help;user_needs_advice;en
+i need advice;user_needs_advice;en
+give me some tips?;user_needs_advice;en
+you have a suggestion for me?;user_needs_advice;en
+what advice do you have for me?;user_needs_advice;en
+you have advice for me?;user_needs_advice;en
+do you have advice for me?;user_needs_advice;en
+do you have any advice for me?;user_needs_advice;en
+tell me the best way;user_needs_advice;en
+please advise me;user_needs_advice;en
+i'd like your advice;user_needs_advice;en
+can i ask your advice?;user_needs_advice;en
+can i ask for your advice?;user_needs_advice;en
+can you give me a little advice?;user_needs_advice;en
+can you help me out?;user_needs_advice;en
+can you give me some advice?;user_needs_advice;en
+could you advise me?;user_needs_advice;en
+can you advise me?;user_needs_advice;en
+please help me;user_needs_advice;en
+can you give me a suggestion?;user_needs_advice;en
+can you give me advice?;user_needs_advice;en
+could you offer advice?;user_needs_advice;en
+can you provide any advice;user_needs_advice;en
+can you offer advice?;user_needs_advice;en
+can you offer any advice?;user_needs_advice;en
+give me some advice about what to do;user_needs_advice;en
+give me some advice about this;user_needs_advice;en
+give me some advice about it;user_needs_advice;en
+give me some advice about ;user_needs_advice;en
+please help me with advice;user_needs_advice;en
+i can use some advice;user_needs_advice;en
+i could use some advice;user_needs_advice;en
+i need a piece of advice from you;user_needs_advice;en
+i need advice from you;user_needs_advice;en
+i need an advice from you;user_needs_advice;en
+i would like to get your advice;user_needs_advice;en
+i ask you for your advice;user_needs_advice;en
+i'm seeking your advice;user_needs_advice;en
+i am seeking your advice;user_needs_advice;en
+i seek your advice;user_needs_advice;en
+what can you recommend?;user_needs_advice;en
+what suggestions do you have for other people?;user_needs_advice;en
+what suggestions would you give?;user_needs_advice;en
+what advice would you give?;user_needs_advice;en
+what do you think?;user_needs_advice;en
+what would you suggest?;user_needs_advice;en
+what do you suggest?;user_needs_advice;en
+recommend some advice?;user_needs_advice;en
+what's your advice?;user_needs_advice;en
+what is your advice?;user_needs_advice;en
+i'm sad;user_sad;en
+i grieve;user_sad;en
+i'm grieving;user_sad;en
+i'm depressed;user_sad;en
+i feel sad;user_sad;en
+i'm feeling sad;user_sad;en
+i'm frustrated;user_sad;en
+i'm upset;user_sad;en
+i am upset;user_sad;en
+i'm just not happy;user_sad;en
+i am unhappy;user_sad;en
+i'm unhappy;user_sad;en
+i have a bad day;user_sad;en
+i'm having a bad day;user_sad;en
+i want to cry;user_sad;en
+i'm not happy about it;user_sad;en
+i'm not happy;user_sad;en
+i'm sleepy;user_sleepy;en
+i want to sleep;user_sleepy;en
+i am going to sleep;user_sleepy;en
+i'm trying to fall asleep;user_sleepy;en
+i'm falling asleep;user_sleepy;en
+i sleep;user_sleepy;en
+i'm sleeping;user_sleepy;en
+i test you;user_testing_agent;en
+i'm trying to test you;user_testing_agent;en
+i'm testing you;user_testing_agent;en
+can i test you?;user_testing_agent;en
+i want to test you;user_testing_agent;en
+i just'm trying to test it on you;user_testing_agent;en
+lets try it out;user_testing_agent;en
+testing the chatbot;user_testing_agent;en
+testing a chatbot;user_testing_agent;en
+testing chatbots;user_testing_agent;en
+i'm exhausted;user_tired;en
+i'm depleted;user_tired;en
+i'm drained;user_tired;en
+i'm too busy;user_tired;en
+i've been so overworked;user_tired;en
+i'm overworked;user_tired;en
+i've overworked;user_tired;en
+i'm tired;user_tired;en
+i am tired;user_tired;en
+i get tired;user_tired;en
+i become weary;user_tired;en
+i get weary;user_tired;en
+i grow weary;user_tired;en
+i'm wiped out;user_tired;en
+i'm getting tired;user_tired;en
+i feel tired;user_tired;en
+i'm waiting;user_waits;en
+we wait;user_waits;en
+we're waiting;user_waits;en
+i'll wait;user_waits;en
+can't wait;user_waits;en
+i can't wait;user_waits;en
+i can't wait anymore;user_waits;en
+how long do i wait?;user_waits;en
+how long do i have to wait?;user_waits;en
+i'll miss you;user_wants_to_see_agent_again;en
+can i see you again?;user_wants_to_see_agent_again;en
+i just want to talk;user_wants_to_talk;en
+let's talk about something;user_wants_to_talk;en
+let's do a conversation;user_wants_to_talk;en
+let's have some discussions;user_wants_to_talk;en
+can i speak?;user_wants_to_talk;en
+can i start to speak?;user_wants_to_talk;en
+can i start speaking?;user_wants_to_talk;en
+can we speak?;user_wants_to_talk;en
+can we talk?;user_wants_to_talk;en
+let's talk about it;user_wants_to_talk;en
+i'd like to talk to you;user_wants_to_talk;en
+i want to talk to you;user_wants_to_talk;en
+i have to talk to you;user_wants_to_talk;en
+i need to talk to you;user_wants_to_talk;en
+i'd like to talk with you;user_wants_to_talk;en
+i want to talk with you;user_wants_to_talk;en
+i want to speak to you;user_wants_to_talk;en
+i want to speak with you;user_wants_to_talk;en
+can we chat?;user_wants_to_talk;en
+i'll come back with you in a minute;user_will_be_back;en
+i'll get back to you;user_will_be_back;en
+i'll be back with you in a minute;user_will_be_back;en
+i'll come back to you in a minute;user_will_be_back;en
+i promise i'll come back;user_will_be_back;en
+i promise to come back;user_will_be_back;en
+i'll be back in a couple of minutes;user_will_be_back;en
+i'll be back in a few minutes;user_will_be_back;en

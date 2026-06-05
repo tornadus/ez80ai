@@ -15,7 +15,8 @@ import os
 import numpy as np
 import torch
 
-from train import NeochatModel, CHARSET, NUM_CHARS, HIDDEN_SIZES, INPUT_SIZE
+from train import (NeochatModel, CHARSET, NUM_CHARS, HIDDEN_SIZES, INPUT_SIZE,
+                   filter_legacy_state)
 
 
 def export_model(model_path, output_path):
@@ -33,7 +34,7 @@ def export_model(model_path, output_path):
         hidden_sizes=arch['hidden_sizes'],
         num_chars=num_chars,
     )
-    model.load_state_dict(checkpoint['model_state'])
+    model.load_state_dict(filter_legacy_state(checkpoint['model_state']))
     model.eval()
 
     params = model.get_quantized_params()

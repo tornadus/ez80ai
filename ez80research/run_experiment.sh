@@ -45,6 +45,13 @@ GIT_BEFORE="$(git rev-parse HEAD)"
 FILES_CHANGED="$(git diff --name-only HEAD | paste -sd, - )"
 [ -z "$FILES_CHANGED" ] && FILES_CHANGED="-"
 
+# Safety net: if the run is interrupted (Ctrl-C / kill) AFTER we commit the edit
+# (step 2) but BEFORE the keep/revert decision (step 7), the experiment commit
+# would otherwise linger as HEAD and silently become the next baseline. The trap
+# reverts to the pre-experiment commit unless the experiment was explicitly kept.
+KEPT=0
+trap '[ "${KEPT}" = "1" ] || { echo "[interrupt] reverting to ${GIT_BEFORE}" >&2; git reset -q --hard "${GIT_BEFORE}" 2>/dev/null; rm -f model.npz bin/NEO*.8xv bin/NEOCHAT.8xp 2>/dev/null; }; exit 130' INT TERM
+
 # --- 2. commit the edit first (so every experiment is one revertible commit) ---
 git add -A
 if git diff --cached --quiet; then
@@ -61,13 +68,18 @@ fi
 rm -f neochat_model.pt model.npz bin/NEO*.8xv bin/NEOCHAT.8xp
 echo "[train] epochs=$EPOCHS timeout=${TRAIN_TIMEOUT}s data=$DATA (from scratch)"
 TRAIN_START=$SECONDS
-timeout "${TRAIN_TIMEOUT}"s "$PY" train.py -f "$DATA" \
+# Send SIGINT (not the default SIGTERM) on timeout: train.py catches KeyboardInterrupt,
+# breaks the epoch loop, and still saves a (best/latest) checkpoint, so an experiment
+# that hits the wall-clock ceiling is evaluated on what it trained instead of vanishing.
+timeout -s INT "${TRAIN_TIMEOUT}"s "$PY" train.py -f "$DATA" \
     --epochs "$EPOCHS" --save-best --quant-target "$EPOCHS" \
     > "$RUNLOG" 2>&1
 TRAIN_RC=$?
 TRAIN_SECS=$(( SECONDS - TRAIN_START ))
 EPOCHS_RUN="$(grep -Eo 'Epoch [0-9]+' "$RUNLOG" | tail -1 | grep -Eo '[0-9]+' || echo 0)"
-[ "$TRAIN_RC" -eq 124 ] && echo "[train] hit wall-clock timeout (using --save-best checkpoint)"
+# 124 = timeout fired; 130 = process exited on the SIGINT we sent (graceful save).
+{ [ "$TRAIN_RC" -eq 124 ] || [ "$TRAIN_RC" -eq 130 ]; } && \
+    echo "[train] hit wall-clock timeout — saved partial checkpoint and evaluating it"
 
 # --- 4. evaluate (feasibility + quality) ---
 EVAL_SAMPLES="$EVAL_SAMPLES" "$PY" "$RESEARCH/evaluate.py" \

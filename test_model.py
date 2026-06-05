@@ -24,7 +24,7 @@ import torch
 from train import (
     NeochatModel, CHARSET, EOS_IDX, NUM_CHARS, DUAL_BIAS_THRESHOLD,
     ACTIVATION_SCALE, create_training_examples_with_pos,
-    generate_response, char_to_idx, idx_to_char,
+    generate_response, char_to_idx, idx_to_char, filter_legacy_state,
 )
 from encoding import TrigramEncoder, ContextEncoder, parse_pair
 
@@ -46,7 +46,7 @@ def get_device():
 def load_model(model_path, device):
     cp = torch.load(model_path, weights_only=False, map_location='cpu')
     model = NeochatModel()
-    model.load_state_dict(cp['model_state'])
+    model.load_state_dict(filter_legacy_state(cp['model_state']))
     model.to(device)
     model.eval()
     epochs = cp.get('total_epochs', 0)
@@ -103,9 +103,11 @@ def test_intacc(model, device, n_samples=1000):
     print(f"    Int accuracy:   {int_acc:.1%}")
     print(f"    Float/Int agreement: {agreement:.1%}")
 
-    passed = int_acc > 0.10  # Reasonable threshold for 43-class problem
+    # Trained models sit around ~55-60% IntAcc; 40% catches a real regression
+    # while leaving headroom for sampling noise (a near-random model is ~1/43=2%).
+    passed = int_acc > 0.40
     status = "PASS" if passed else "FAIL"
-    print(f"    → {status} (IntAcc={int_acc:.1%}, threshold=10%)")
+    print(f"    → {status} (IntAcc={int_acc:.1%}, threshold=40%)")
     return passed
 
 
@@ -256,10 +258,13 @@ def test_personality(model, device, n_samples=20):
             print(f"      '{query}' → '{resp}' (expected '{expected}')")
 
     pct = matches / len(test_pairs) if test_pairs else 0
-    passed = pct >= 0.30  # 30% exact match is reasonable for a mixed model
+    # Personality pairs are 10x oversampled, so a healthy model recalls most of
+    # them (~85% observed); 60% catches a regression without flaking on the few
+    # genuinely ambiguous prompts.
+    passed = pct >= 0.60
     status = "PASS" if passed else "FAIL"
     print(f"    Exact matches: {matches}/{len(test_pairs)} ({pct:.1%})")
-    print(f"    → {status} (threshold=30%)")
+    print(f"    → {status} (threshold=60%)")
     return passed
 
 
@@ -307,6 +312,8 @@ def main():
     args = parser.parse_args()
 
     random.seed(args.seed)
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
     device = get_device()
 
     print("=" * 60)
@@ -314,6 +321,11 @@ def main():
     print("=" * 60)
     print(f"Device: {device}")
     print(f"Model: {args.model}")
+
+    if not os.path.exists(args.model):
+        print(f"\nModel not found: {args.model}\n"
+              f"Train one first:  python3 train.py -f training_data.txt --save-best")
+        sys.exit(0)
 
     model, epochs, int_acc = load_model(args.model, device)
     print(f"Epochs: {epochs}, Best IntAcc: {int_acc:.1%}")
