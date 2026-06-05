@@ -30,6 +30,7 @@ from encoding import (
     TrigramEncoder, ContextEncoder,
     create_training_examples, parse_pair, load_chunk,
 )
+import modelspec
 
 # ============================================================
 # Configuration
@@ -42,17 +43,25 @@ IDX_TO_CHAR = {i: c for i, c in enumerate(CHARSET)}
 EOS_IDX = len(CHARSET) - 1
 NUM_CHARS = len(CHARSET)
 
-# Architecture
-HIDDEN_SIZES = [512, 512, 256]
-INPUT_SIZE = 256  # 128 query + 128 context buckets
+# Model spec — the single source of truth (modelspec.py). The architecture and
+# integer-path constants below are SOURCED from it so they can no longer drift
+# from what the build/eval/faithfulness stages read. Defaults reproduce the
+# released baseline exactly; an experiment edits modelspec.DEFAULT_SPEC.
+SPEC = modelspec.load_spec()
+assert SPEC['num_classes'] == NUM_CHARS, (
+    f"spec num_classes {SPEC['num_classes']} != charset size {NUM_CHARS}")
 
-# 24-bit integer simulation constants
-ACTIVATION_SCALE = 32
+# Architecture (from SPEC)
+HIDDEN_SIZES = SPEC['hidden_sizes']
+INPUT_SIZE = SPEC['input_size']  # query_buckets + context_buckets
+
+# 24-bit integer simulation constants (from SPEC)
+ACTIVATION_SCALE = SPEC['activation_scale']
 
 CHECKPOINT_FILE = os.path.join(os.path.dirname(__file__), 'neochat_model.pt')
 
-# Dual bias: first N characters use bias_start, rest use bias_rest
-DUAL_BIAS_THRESHOLD = 3
+# Dual bias: first N characters use bias_start, rest use bias_rest (from SPEC)
+DUAL_BIAS_THRESHOLD = SPEC['dual_bias_threshold']
 
 
 def filter_legacy_state(state):
@@ -97,11 +106,16 @@ class NeochatModel(nn.Module):
     """
 
     def __init__(self, input_size=INPUT_SIZE, hidden_sizes=HIDDEN_SIZES,
-                 num_chars=NUM_CHARS):
+                 num_chars=NUM_CHARS, spec=None):
         super().__init__()
         self.input_size = input_size
         self.hidden_sizes = hidden_sizes
         self.num_chars = num_chars
+        # The integer path reads its constants (quantile, per-layer bit-width and
+        # shift, rounding, activation scale, dual-bias threshold) from the spec, so
+        # the sim stays config-driven and in lockstep with the build. Defaults to
+        # the module spec; eval can pass a model's frozen baked spec instead.
+        self.spec = spec if spec is not None else SPEC
 
         # Hidden layers
         self.layers = nn.ModuleList()
@@ -169,36 +183,52 @@ class NeochatModel(nn.Module):
         return logits
 
     def _forward_int(self, x, positions=None):
-        """Simulate eZ80 24-bit native accumulator."""
-        x = (x * ACTIVATION_SCALE).round()
+        """Simulate the eZ80 integer path. The torch MIRROR of intkernel.forward_int
+        (held bit-exact by test_intkernel.py); all constants come from self.spec."""
+        spec = self.spec
+        q = spec['weight_quantile']
+        bits = spec['weight_bits']
+        shifts = spec['inter_layer_shift']
+        rounding = spec['rounding']
+        thr = spec['dual_bias_threshold']
+        ascale = spec['activation_scale']
+        half = 1 << (spec['accum_bits'] - 1)
+        mod = 1 << spec['accum_bits']
 
-        for layer in self.layers:
-            w = layer.weight
-            scale = torch.quantile(w.abs().flatten(), 0.85).clamp(min=1e-6)
-            w_quant = torch.clamp(torch.round(w / scale), -2, 1)
-            b_quant = torch.round(layer.bias * ACTIVATION_SCALE)
+        def quant(w, b):
+            scale = torch.quantile(w.abs().flatten(), q).clamp(min=1e-6)
+            lo, hi = -(1 << (b - 1)), (1 << (b - 1)) - 1
+            return torch.clamp(torch.round(w / scale), lo, hi)
 
+        def wrap(t):
+            return ((t + half) % mod) - half
+
+        def shift(t, s):
+            if s == 0:
+                return t
+            if rounding == 'floor':
+                return torch.floor(t / (1 << s))
+            return torch.div(t, 1 << s, rounding_mode='trunc')
+
+        x = (x * ascale).round()
+
+        for i, layer in enumerate(self.layers):
+            w_quant = quant(layer.weight, bits[i])
+            b_quant = torch.round(layer.bias * ascale)
             x = x @ w_quant.T + b_quant
-            x = ((x + 8388608) % 16777216) - 8388608  # 24-bit wrap
-            x = torch.div(x, 4, rounding_mode='trunc')
+            x = shift(wrap(x), shifts[i])
             x = torch.relu(x)
 
         # Output layer (no built-in bias)
-        w = self.output_layer.weight
-        scale = torch.quantile(w.abs().flatten(), 0.85).clamp(min=1e-6)
-        w_quant = torch.clamp(torch.round(w / scale), -2, 1)
-        logits = x @ w_quant.T
-        logits = ((logits + 8388608) % 16777216) - 8388608
-        logits = torch.div(logits, 4, rounding_mode='trunc')
+        w_quant = quant(self.output_layer.weight, bits[-1])
+        logits = shift(wrap(x @ w_quant.T), shifts[-1])
 
         # Add dual bias (quantized)
-        b_start_q = torch.round(self.bias_start * ACTIVATION_SCALE)
-        b_rest_q = torch.round(self.bias_rest * ACTIVATION_SCALE)
-
+        b_start_q = torch.round(self.bias_start * ascale)
+        b_rest_q = torch.round(self.bias_rest * ascale)
         if positions is not None:
-            mask_start = (positions < DUAL_BIAS_THRESHOLD).unsqueeze(1)
-            bias = torch.where(mask_start, b_start_q, b_rest_q)
-            logits = logits + bias
+            mask_start = (positions < thr).unsqueeze(1)
+            logits = logits + torch.where(mask_start, b_start_q, b_rest_q)
         else:
             logits = logits + b_rest_q
 
@@ -216,26 +246,31 @@ class NeochatModel(nn.Module):
         plus fc4_bias_start for dual bias.
         """
         params = {}
+        q = self.spec['weight_quantile']
+        bits = self.spec['weight_bits']
+        ascale = self.spec['activation_scale']
+
+        def quant_w(w, b):
+            scale = torch.quantile(w.abs().flatten(), q).clamp(min=1e-6)
+            lo, hi = -(1 << (b - 1)), (1 << (b - 1)) - 1
+            return torch.clamp(torch.round(w / scale), lo, hi).cpu().numpy().astype(np.int8)
 
         # Hidden layers
         for i, layer in enumerate(self.layers):
             name = f'fc{i+1}'
             with torch.no_grad():
-                w = layer.weight
-                w_scale = torch.quantile(w.abs().flatten(), 0.85).clamp(min=1e-6)
-                w_quant = torch.clamp(torch.round(w / w_scale), -2, 1).cpu().numpy().astype(np.int8)
-                b_quant = torch.round(layer.bias * ACTIVATION_SCALE).cpu().numpy().astype(np.int16)
-                params[f'{name}_weight'] = w_quant
-                params[f'{name}_bias'] = b_quant
+                params[f'{name}_weight'] = quant_w(layer.weight, bits[i])
+                params[f'{name}_bias'] = torch.round(
+                    layer.bias * ascale).cpu().numpy().astype(np.int16)
 
-        # Output layer
+        # Output layer (dual bias: fc{N}_bias == rest, fc{N}_bias_start == start)
+        out_idx = len(self.layers) + 1
         with torch.no_grad():
-            w = self.output_layer.weight
-            w_scale = torch.quantile(w.abs().flatten(), 0.85).clamp(min=1e-6)
-            w_quant = torch.clamp(torch.round(w / w_scale), -2, 1).cpu().numpy().astype(np.int8)
-            params['fc4_weight'] = w_quant
-            params['fc4_bias'] = torch.round(self.bias_rest * ACTIVATION_SCALE).cpu().numpy().astype(np.int16)
-            params['fc4_bias_start'] = torch.round(self.bias_start * ACTIVATION_SCALE).cpu().numpy().astype(np.int16)
+            params[f'fc{out_idx}_weight'] = quant_w(self.output_layer.weight, bits[-1])
+            params[f'fc{out_idx}_bias'] = torch.round(
+                self.bias_rest * ascale).cpu().numpy().astype(np.int16)
+            params[f'fc{out_idx}_bias_start'] = torch.round(
+                self.bias_start * ascale).cpu().numpy().astype(np.int16)
 
         return params
 
@@ -325,8 +360,9 @@ def train(epochs=300, lr=0.002, save_best=False, batch_size=8192, quant_target_e
     print(f"Architecture: {INPUT_SIZE} → {' → '.join(map(str, HIDDEN_SIZES))} → {NUM_CHARS}")
     print(f"Dual bias threshold: first {DUAL_BIAS_THRESHOLD} chars use bias_start")
 
-    query_encoder = TrigramEncoder(num_buckets=128)
-    context_encoder = ContextEncoder(num_buckets=128, context_len=8)
+    query_encoder = TrigramEncoder(num_buckets=SPEC['query_buckets'])
+    context_encoder = ContextEncoder(num_buckets=SPEC['context_buckets'],
+                                     context_len=SPEC['context_len'])
 
     # Generate all character-level examples upfront (CPU)
     print("Generating character examples...")
@@ -509,6 +545,10 @@ def train(epochs=300, lr=0.002, save_best=False, batch_size=8192, quant_target_e
             'hidden_sizes': HIDDEN_SIZES,
             'num_classes': NUM_CHARS,
         },
+        # Frozen resolved spec: every downstream stage reads THIS, never the live
+        # modelspec.py, so the model is always built/eval'd with the spec it was
+        # trained with (the anti-skew invariant).
+        'modelspec': modelspec.to_json(SPEC),
         'charset': CHARSET,
         'total_epochs': total_epochs,
         'best_int_acc': best_int_acc,

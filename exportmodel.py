@@ -17,6 +17,8 @@ import torch
 
 from train import (NeochatModel, CHARSET, NUM_CHARS, HIDDEN_SIZES, INPUT_SIZE,
                    filter_legacy_state)
+import modelspec
+from loadmodel import load_spec_from_model
 
 
 def export_model(model_path, output_path):
@@ -47,6 +49,11 @@ def export_model(model_path, output_path):
     export_data['_charset'] = np.array(charset.encode('utf-8'))
     export_data['_dual_bias_threshold'] = np.array(
         checkpoint.get('dual_bias_threshold', 3))
+    # Carry the frozen resolved spec forward into the .npz so the build and the
+    # faithfulness gate read the exact spec the model was trained with. Legacy
+    # checkpoints (no baked spec) reconstruct an equivalent one from arch.
+    spec = load_spec_from_model(model_path)
+    export_data['_modelspec'] = np.array(modelspec.to_json(spec).encode('utf-8'))
 
     np.savez(output_path, **export_data)
     print(f"Exported to {output_path}")

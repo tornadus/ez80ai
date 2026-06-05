@@ -8,6 +8,34 @@ CI environments to run without PyTorch installed.
 import json
 import numpy as np
 
+import modelspec
+
+
+def load_spec_from_model(model_path: str, default_dual_bias: int = 3) -> dict:
+    """Return the FROZEN resolved model spec baked into an artifact.
+
+    Reads '_modelspec' (.npz) / 'modelspec' (.pt). For LEGACY artifacts that
+    predate modelspec, reconstructs an equivalent spec from the architecture dict
+    + dual-bias threshold via modelspec.from_legacy, so old models still build/
+    eval byte-for-byte as before. This is the single seam every downstream stage
+    uses to obtain the spec — never the live modelspec.py."""
+    if model_path.endswith('.npz'):
+        data = np.load(model_path)
+        if '_modelspec' in data.files:
+            return modelspec.from_json(bytes(data['_modelspec']).decode('utf-8'))
+        arch = json.loads(bytes(data['_architecture']).decode('utf-8'))
+        dbt = (int(data['_dual_bias_threshold'])
+               if '_dual_bias_threshold' in data.files else default_dual_bias)
+        return modelspec.from_legacy(arch, dbt)
+    elif model_path.endswith('.pt'):
+        import torch
+        cp = torch.load(model_path, weights_only=False, map_location='cpu')
+        if cp.get('modelspec'):
+            return modelspec.from_json(cp['modelspec'])
+        return modelspec.from_legacy(
+            cp['architecture'], cp.get('dual_bias_threshold', default_dual_bias))
+    raise ValueError(f"Unknown model format: {model_path} (expected .pt or .npz)")
+
 
 def load_model_params(model_path: str) -> tuple[dict, dict, str]:
     """
