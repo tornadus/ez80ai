@@ -67,7 +67,7 @@ DEFAULT_SPEC = {
 
     # --- training hyperparameters ---
     "lr": 0.002,
-    "batch_size": 4096,
+    "batch_size": 3072,
     "epochs": 300,
     "weight_decay": 1e-4,                    # LOAD-BEARING for quantization (do not 0)
     "optimizer": "adam",
