@@ -429,8 +429,8 @@ def train(epochs=300, lr=0.002, save_best=False, batch_size=8192, quant_target_e
     # the epochs already trained, so re-running on an existing checkpoint continues
     # the curve instead of restarting at full LR each invocation.
     horizon = max(quant_target_epoch, total_epochs + epochs)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, T_max=horizon, eta_min=lr * SPEC['eta_min_frac'])
+    scheduler = torch.optim.lr_scheduler.PolynomialLR(
+        optimizer, total_iters=horizon, power=2.0)  # polynomial decay (experiment) vs cosine
     # Compute budget (P6): in 'grad_steps' mode, stop after a fixed number of
     # optimizer steps regardless of wall-clock, so a slower-but-better arch gets
     # the SAME amount of training as a fast one (fair comparison). 'wall_s' keeps
