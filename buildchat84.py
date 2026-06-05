@@ -1734,6 +1734,25 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
         b.label('DBG_ARGV1'); b.db(0)
         b.label('DBG_ARGV2'); b.db(0)
 
+    # Metadata for the host-side faithfulness gate (faithgate.py). Pure Python
+    # attached to the builder — it emits NO bytes, so the build stays byte-for-byte
+    # identical. It tells the eZ80 interpreter how to drive one forward pass:
+    # which routines to CALL in order, the genpos-selected output routine, and the
+    # buffer/flag labels to read/write. When the codegen is generalized (more/
+    # fewer layers, different shards), update this list to match.
+    b.forward_meta = {
+        'input_size': input_size,
+        'output_size': output_size,
+        'num_chars': num_chars,
+        'dual_bias_threshold': dual_bias_threshold,
+        'appvar_names': list(APPVAR_NAMES),
+        'layer_calls': ['LAYER1', 'RELU1', 'LAYER2A', 'LAYER2B', 'RELU2',
+                        'LAYER3', 'RELU3'],
+        'output_start': 'LAYER4_START',
+        'output_rest': 'LAYER4_REST',
+        'argmax': 'ARGMAX',
+    }
+
     return b, appvar_blobs
 
 

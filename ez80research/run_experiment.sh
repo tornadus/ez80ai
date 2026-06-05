@@ -33,7 +33,7 @@ MARGIN="${MARGIN:-0.005}"
 DATA="${DATA:-training_data.txt}"
 
 # --- grader tripwire: refuse to run if the agent edited the grading harness ---
-GRADER_RE='^(sizes\.py|ez80research/(evaluate|budget)\.py|ez80research/run_experiment\.sh|ez80research/program\.md)$'
+GRADER_RE='^(sizes\.py|intkernel\.py|faithgate\.py|ez80interp\.py|ez80research/(evaluate|budget)\.py|ez80research/run_experiment\.sh|ez80research/program\.md)$'
 if git status --porcelain | awk '{print $2}' | grep -Eq "$GRADER_RE"; then
     echo "ABORT: grader file modified — refusing to run experiment." >&2
     git status --porcelain | grep -E "$GRADER_RE" >&2

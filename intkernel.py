@@ -118,6 +118,53 @@ def forward_int(weights, biases, bias_start, x, spec, positions=None):
     return logits
 
 
+def wrap16(x):
+    """Wrap into a signed 16-bit value — the device stores every inter-layer
+    activation and every logit as an int16 (2 bytes), so it wraps there."""
+    return ((x.astype(np.int64) + (1 << 15)) % (1 << 16)) - (1 << 15)
+
+
+def forward_device(weights, biases, bias_start, x, spec, positions=None):
+    """The eZ80 DEVICE CONTRACT (what the build's machine code computes), as
+    opposed to forward_int (the sim/metric). Differences from forward_int:
+      * rounding is always FLOOR (arithmetic shift),
+      * every inter-layer activation AND the logits are stored as int16 (wrap16),
+      * the output layer adds bias*2**shift BEFORE the shift (the build pre-scales
+        the output bias so (matmul + bias<<s) >> s == (matmul >> s) + bias).
+    This is the reference the eZ80 faithfulness gate compares the emitted machine
+    code against. For the baseline it equals test_faithfulness.device()."""
+    acc_bits = spec['accum_bits']
+    shifts = spec['inter_layer_shift']
+    scale = spec['activation_scale']
+    thr = spec['dual_bias_threshold']
+
+    x = np.atleast_2d(np.asarray(x))
+    h = np.round(x.astype(np.float64) * scale).astype(np.int64)
+
+    n = len(weights)
+    for i in range(n - 1):
+        acc = wrap_accum(h @ weights[i].astype(np.int64).T + biases[i].astype(np.int64),
+                         acc_bits)
+        h = np.maximum(wrap16(acc >> shifts[i]), 0)   # int16 store, then relu
+
+    s = shifts[-1]
+    b_rest = biases[-1].astype(np.int64)
+    b_start = bias_start.astype(np.int64)
+    if positions is None:
+        bias = b_rest
+    else:
+        positions = np.asarray(positions).reshape(-1, 1)
+        bias = np.where(positions < thr, b_start, b_rest)
+    acc = wrap_accum(h @ weights[-1].astype(np.int64).T + (bias << s), acc_bits)
+    return wrap16(acc >> s)
+
+
+def forward_device_params(params, x, spec, positions=None):
+    """Device-contract forward straight from an npz-style param dict."""
+    weights, biases, bias_start = layers_from_params(params)
+    return forward_device(weights, biases, bias_start, x, spec, positions)
+
+
 def layers_from_params(params):
     """Extract ordered (weights, biases, bias_start) from an npz-style param dict
     with keys fc1_weight/fc1_bias .. fcN_weight/fcN_bias (+ fcN_bias_start). The

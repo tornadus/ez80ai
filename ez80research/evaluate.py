@@ -10,6 +10,9 @@ Given a freshly trained checkpoint, this:
                cross-checks measured vs reported IntAcc to catch a faked metric.
   3. EXPORT    runs the real exportmodel.py (.pt -> .npz).
   4. BUILD     runs the real buildchat84.py (.npz -> .8xp + 4x .8xv).
+  4.5 FAITH    executes the REAL emitted eZ80 machine code (faithgate/ez80interp)
+               and requires it to match the integer reference EXACTLY, so a
+               codegen bug can't silently ship on-calc gibberish.
   5. SIZE GATE applies the hard calculator budget to the REAL printed sizes.
   6. VERDICT   prints one grep-able line and exits 0 (PASS) / 1 (FAIL).
 
@@ -36,6 +39,7 @@ if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
 import sizes  # noqa: E402
+import faithgate  # noqa: E402
 from train import (  # noqa: E402
     NeochatModel, CHARSET, INPUT_SIZE, NUM_CHARS,
     create_training_examples_with_pos, filter_legacy_state,
@@ -262,8 +266,19 @@ def main():
             _fail(intacc, empty_sizes, [reason])
         print("[build] OK")
 
-        # 5. SIZE GATE (against real printed sizes)
         build_sizes = parse_build_sizes(bld.stdout)
+
+        # 4.5 FAITHFULNESS GATE — execute the REAL emitted eZ80 machine code and
+        # require it to reproduce the integer reference (intkernel.forward_device)
+        # exactly. Catches codegen/asm bugs that would silently ship on-calc
+        # gibberish; the IntAcc metric alone cannot (it only runs the Python sim).
+        ok_f, freasons = faithgate.check_faithfulness(args.npz)
+        if not ok_f:
+            print(f"[faith] DIVERGENT: {freasons[:3]}")
+            _fail(intacc, build_sizes, ['FAITH_FAIL'] + freasons[:2])
+        print("[faith] OK")
+
+        # 5. SIZE GATE (against real printed sizes)
         ok, reasons = sizes.check_budget(build_sizes)
         ram_kb = sizes.total_ram(build_sizes['program'],
                                  build_sizes['total_weight']) / 1024
