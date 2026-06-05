@@ -52,18 +52,21 @@ class BudgetError(Exception):
     """Raised when a built model exceeds the calculator RAM budget."""
 
 
-def weight_data_bytes(arch):
+def weight_data_bytes(arch, weight_bits=2):
     """Total packed bytes of weights+bias+dual-bias for an architecture dict
     {'input_size', 'hidden_sizes', 'num_classes'}. Mirrors the build's packing:
-    2-bit weights (4 per byte) + int16 bias per neuron, plus a second (dual) bias
-    set on the output layer. (The build uses a single global divide-by-4, NOT a
-    per-neuron shift byte, so none is counted.) Independent of AppVar sharding."""
+    `weight_bits`-bit weights (8//bits per byte) + int16 bias per neuron, plus a
+    second (dual) bias set on the output layer. `weight_bits` is a scalar (every
+    layer) or a per-layer list of length len(hidden_sizes)+1. Independent of AppVar
+    sharding."""
     dims = [arch['input_size']] + list(arch['hidden_sizes']) + [arch['num_classes']]
+    nlayers = len(dims) - 1
+    bits = weight_bits if isinstance(weight_bits, (list, tuple)) else [weight_bits] * nlayers
     weights = bias = 0
-    for i in range(len(dims) - 1):
+    for i in range(nlayers):
         n_in, n_out = dims[i], dims[i + 1]
-        weights += (n_in * n_out) // 4   # 4 weights / byte (2-bit packing)
-        bias += n_out * 2                # int16 bias / neuron
+        weights += (n_in * n_out * bits[i]) // 8   # 8//bits weights per byte
+        bias += n_out * 2                          # int16 bias / neuron
     dual_bias = arch['num_classes'] * 2
     return {'weights': weights, 'bias': bias,
             'dual_bias': dual_bias, 'total': weights + bias + dual_bias}
@@ -96,6 +99,31 @@ def estimate_memory(arch):
         'min_appvars': -(-w['total'] // MAX_APPVAR_BYTES),  # ceil
         'fits': ram <= RAM_BUDGET_BYTES,
     }
+
+
+def pregate(spec):
+    """Fast spec-only RAM feasibility PRE-gate (no train, no build). Reject an
+    infeasible model in <1s instead of after a full train+build. Bit-width-aware,
+    and sizes the real ds() working buffers (TOKBUF + PING + PONG + OUTBUF) from
+    the spec, plus a conservative program-code allowance. Deliberately slightly
+    OVER-estimates so it never green-lights a model the real build gate rejects.
+    Returns (fits, est_ram_bytes, reasons)."""
+    arch = {'input_size': spec['input_size'],
+            'hidden_sizes': spec['hidden_sizes'],
+            'num_classes': spec['num_classes']}
+    w = weight_data_bytes(arch, spec['weight_bits'])
+    hidden = spec['hidden_sizes']
+    max_hidden = max(hidden) if hidden else spec['num_classes']
+    # ds() working buffers emitted into the program image (see buildchat84 DATA).
+    buffers = (spec['input_size'] * 2          # TOKBUF
+               + 2 * max_hidden * 2             # PING + PONG
+               + spec['num_classes'] * 2        # OUTBUF
+               + 512)                           # INPBUF/CTX/scratch slack
+    est_ram = PROGRAM_ESTIMATE_BYTES + buffers + w['total']
+    reasons = []
+    if est_ram > RAM_BUDGET_BYTES:
+        reasons.append(f'PREGATE_RAM_OVER({est_ram}>{RAM_BUDGET_BYTES})')
+    return (len(reasons) == 0, est_ram, reasons)
 
 
 def check_budget(sizes):

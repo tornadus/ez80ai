@@ -120,40 +120,59 @@ mirror of the sim (pure argmax + dual bias, full 24-bit counters). If you change
    layer may be split across as many AppVars as needed, so that is a build-layout
    detail — RAM is what bounds feasibility.) Enforced against the build's real
    printed sizes.
-4. **Fixed I/O contract.** Output charset stays the exact 43 chars incl. EOS
-   (`train.CHARSET`); input encoding stays 256-dim (128 query + 128 context,
-   `INPUT_SIZE`). Do not shrink the output space or change the tokenizer to
-   inflate accuracy.
-5. **Grader files are OFF-LIMITS.** Never edit `sizes.py`,
-   `ez80research/evaluate.py`, `ez80research/budget.py`,
-   `ez80research/run_experiment.sh`, or this `program.md`. The runner aborts if
-   any grader file is modified.
+4. **Fixed output contract (the TASK).** Output charset stays the exact 43 chars
+   incl. EOS (`train.CHARSET`); do NOT shrink the output space. Input ENCODING is
+   now a degree of freedom (see Levers), but you cannot game the metric with it:
+   the harness rebuilds its eval encoder from your spec and the teacher-forced
+   example construction keeps the next-char label out of the input.
+5. **Grader files are OFF-LIMITS.** Never edit `sizes.py`, `intkernel.py`,
+   `faithgate.py`, `ez80interp.py`, `ez80research/evaluate.py`,
+   `ez80research/budget.py`, `ez80research/run_experiment.sh`, or this
+   `program.md`. The runner aborts if any is modified. (`modelspec.py` is YOURS —
+   that is where you run experiments.)
 
 ## Levers you MAY change (the whole search space)
 
-Read `train.py`, `libqat.py`, and `encoding.py` to see exact names/locations.
+**Everything about the model now lives in ONE file: `modelspec.py`.** An
+experiment = edit `modelspec.DEFAULT_SPEC`. The resolved spec is baked into the
+checkpoint/`.npz` and read by EVERY stage (train, eval, export, build, the
+faithfulness gate), so a knob set once propagates everywhere — no more editing the
+same constant in 6 places or hand-mirroring the build. (Only a genuinely NEW
+mechanism — a new activation, a new quant scheme — needs code, and it must go in
+BOTH `intkernel.py` and the codegen; but those are grader-owned, so prefer spec
+changes.)
 
-- **Hyperparameters** — lr, batch size, the quant/overflow loss weights and the
-  quantization-temperature ramp in the training loop, dual-bias threshold.
-  (Keep `EPOCHS` at the loop default — it's the fairness budget; the baseline was
-  measured at it.)
-- **Architecture** — `HIDDEN_SIZES` near the top of `train.py`. Width changes
-  that keep the 3-hidden-layer topology are the safe lever and trade IntAcc
-  against the RAM budget (the core tension of this project). NOTE:
-  `buildchat84.py` emits a fixed NEOA-D AppVar layout and splits layer 2 as
-  `[:256]/[256:]`; changing the layer COUNT, or widths large enough that a single
-  layer's weights exceed an AppVar's 65535-byte limit, requires generalizing the
-  build's splitter too. The harness rejects anything that doesn't build, so
-  generalizing the splitter to shard any layer across multiple AppVars is itself
-  a legitimate, high-value experiment.
-- **Encoding** — `encoding.py` hashing/bucketing (keep `input_size == 256`).
-- **Quant / training internals** — `libqat.py` 2-bit quantization, overflow
-  regularization, `ACTIVATION_SCALE`.
-- Anything else, as long as the five hard constraints hold.
+Spec knobs (see `modelspec.DEFAULT_SPEC` for names + defaults):
+- **Architecture** — `hidden_sizes` (ANY depth/width; the build auto-shards any
+  layer across AppVars), `activation`.
+- **Quantization** — per-layer `weight_bits` (2/3/4-bit, mixed precision OK),
+  `weight_quantile`, per-layer `inter_layer_shift`, `activation_scale`.
+- **Output bias** — `dual_bias_threshold`.
+- **Encoding** (now a real DOF) — `query_buckets`, `context_buckets` (powers of
+  two, ≤ 256), `context_len`. Query stays trigram, context stays 1..N-gram.
+- **Training** — `lr`, `batch_size`, `weight_decay`, `quant_loss_weight`,
+  `qt_start`, `qt_ramp_factor`, `eta_min_frac`, `epochs`.
+- **Compute budget** — `compute_budget = {mode, limit}`. `grad_steps` gives every
+  arch the SAME number of optimizer steps (fair across slow/fast nets — a slower
+  but better model is no longer silently penalized); `wall_s` is the legacy cap.
+
+**The faithfulness gate (the big change).** The harness now EXECUTES the real
+emitted eZ80 machine code (`faithgate`/`ez80interp`) and requires it to match the
+integer reference (`intkernel.forward_device`) EXACTLY; a `FAITH_FAIL` discards
+the experiment. Build-coupled changes are therefore no longer silent — if your
+codegen disagrees with the sim you find out immediately, so the on-calc-gibberish
+class of bug is gone. A spec-only RAM PRE-GATE also rejects infeasible models in
+<1s before training (look for `[pregate]`).
+
+**Dead-ends now genuinely RE-testable** (they were measured on the trunc sim, or
+were unbuildable; faithfulness now guarantees device truth): depth / layer count,
+>2-bit & mixed-precision weights, encoding geometry, per-layer shift /
+`activation_scale`. NOTE: 4-bit DOUBLES a layer's bytes, so big layers won't fit —
+mixed precision (4-bit only on small/output layers) is the feasible play, and is
+`program.md`'s nominated path past the ~0.60 ceiling.
 
 Because the baseline already nearly fills RAM, "smaller-but-smarter" (better
-accuracy at equal-or-less size) is as valuable as anything — don't fixate on
-just making the net wider.
+accuracy at equal-or-less size) is as valuable as anything.
 
 ## How you operate — the loop
 
@@ -212,6 +231,9 @@ schedules, architectural reshaping within budget).
 - The harness re-computes IntAcc itself via the integer path and cross-checks it
   against the number `train.py` logged; a mismatch fails the experiment.
 - The build is run for real; crashes and over-budget builds fail.
+- The faithfulness gate executes the REAL emitted machine code and requires it to
+  match the integer reference exactly (`FAITH_FAIL` otherwise) — you cannot ship a
+  build whose numerics diverge from the sim, even silently.
 - Do not special-case the evaluator's sample, hardcode outputs, weaken the
   contract, or edit grader files. Because evaluation is empirical, cheating is
   an automatic FAIL.

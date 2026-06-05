@@ -60,6 +60,18 @@ else
     git commit -q -m "exp: $LABEL"
 fi
 
+# --- 2.5 RAM pre-gate (spec-only, <1s): don't waste a full train on a model that
+# provably can't fit the calculator. The real build size gate still runs after a
+# feasible train; this just fails the obviously-infeasible ones fast. ---
+PG="$("$PY" -c "import modelspec,sizes;ok,ram,r=sizes.pregate(modelspec.load_spec());print(1 if ok else 0, int(ram), (';'.join(r) or '-'))" 2>&1)"
+PG_OK="$(printf '%s' "$PG" | awk '{print $1}')"
+PG_RAM="$(printf '%s' "$PG" | awk '{print $2}')"
+PG_REASON="$(printf '%s' "$PG" | awk '{print $3}')"
+echo "[pregate] ok=$PG_OK est_ram_kb=$(awk "BEGIN{printf \"%.1f\", ${PG_RAM:-0}/1024}") reasons=$PG_REASON"
+
+COMPUTE_MODE="-"; GRAD_STEPS=0; BUDGET_HIT=0
+if [ "$PG_OK" = "1" ]; then
+
 # --- 3. bounded training (always from scratch) ---
 # train.py auto-resumes from neochat_model.pt whenever it exists, so a leftover
 # checkpoint from the previous experiment would be fine-tuned instead of the
@@ -100,6 +112,21 @@ REASONS="$(get reasons)";  REASONS="${REASONS:--}"
 REPORTED_ACC="$(grep -oE 'reported [0-9.]+' "$EVALLOG" | tail -1 | awk '{print $2}')"
 REPORTED_ACC="${REPORTED_ACC:-0.0000}"
 
+# compute-budget info from train.py's grep-able [compute] line
+CLINE="$(grep '^\[compute\]' "$RUNLOG" | tail -1)"
+COMPUTE_MODE="$(printf '%s' "$CLINE" | grep -oE 'mode=[^ ]+' | cut -d= -f2)"; COMPUTE_MODE="${COMPUTE_MODE:--}"
+GRAD_STEPS="$(printf '%s' "$CLINE" | grep -oE 'steps=[0-9]+' | cut -d= -f2)"; GRAD_STEPS="${GRAD_STEPS:-0}"
+BUDGET_HIT="$(printf '%s' "$CLINE" | grep -oE 'hit=[0-9]+' | cut -d= -f2)"; BUDGET_HIT="${BUDGET_HIT:-0}"
+
+else
+    # Pre-gate said infeasible: skip train + build, record a fast failure row.
+    echo "[pregate] infeasible — skipping training and build"
+    PASS=0; INTACC="0.0000"; REPORTED_ACC="0.0000"
+    RAM_KB="$(awk "BEGIN{printf \"%.1f\", ${PG_RAM:-0}/1024}")"
+    N_APPVARS=0; MAXAV_KB="0.0"; REASONS="$PG_REASON"
+    EPOCHS_RUN=0; TRAIN_SECS=0
+fi
+
 # --- 6. current best IntAcc among kept rows (else baseline) ---
 BEST=0.0
 if [ -f "$RESULTS" ]; then
@@ -128,12 +155,12 @@ TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 {
     flock 9
     if [ ! -f "$RESULTS" ]; then
-        printf 'ts\texp_id\tlabel\tfiles_changed\tepochs_run\ttrain_secs\tpass\tintacc\treported_acc\tram_kb\tn_appvars\tmaxav_kb\treasons\tkept\tprev_best\n' >> "$RESULTS"
+        printf 'ts\texp_id\tlabel\tfiles_changed\tepochs_run\ttrain_secs\tpass\tintacc\treported_acc\tram_kb\tn_appvars\tmaxav_kb\treasons\tkept\tprev_best\tcompute_mode\tgrad_steps\tbudget_hit\n' >> "$RESULTS"
     fi
-    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
         "$TS" "$EXP_ID" "$LABEL" "$FILES_CHANGED" "$EPOCHS_RUN" "$TRAIN_SECS" \
         "$PASS" "$INTACC" "$REPORTED_ACC" "$RAM_KB" "$N_APPVARS" "$MAXAV_KB" \
-        "$REASONS" "$KEPT" "$BEST" >> "$RESULTS"
+        "$REASONS" "$KEPT" "$BEST" "$COMPUTE_MODE" "$GRAD_STEPS" "$BUDGET_HIT" >> "$RESULTS"
 } 9>>"$RESULTS.lock"
 
 echo "[decision] $DECISION  intacc=$INTACC best=$BEST margin=$MARGIN kept=$KEPT reasons=$REASONS"

@@ -423,12 +423,22 @@ def train(epochs=300, lr=0.002, save_best=False, batch_size=8192, quant_target_e
     # compact so the fixed-scale rounding stays clean. Empirically (ez80research
     # loop, ~34 experiments): wd=0 -> 0.444 IntAcc (catastrophe), wd=1e-4 -> 0.604,
     # wd=2e-4 -> 0.575. Keep at 1e-4.
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=1e-4)
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr,
+                                 weight_decay=SPEC['weight_decay'])
     # Cosine schedule spans the GLOBAL training horizon and is fast-forwarded by
     # the epochs already trained, so re-running on an existing checkpoint continues
     # the curve instead of restarting at full LR each invocation.
     horizon = max(quant_target_epoch, total_epochs + epochs)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=horizon, eta_min=lr*0.02)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer, T_max=horizon, eta_min=lr * SPEC['eta_min_frac'])
+    # Compute budget (P6): in 'grad_steps' mode, stop after a fixed number of
+    # optimizer steps regardless of wall-clock, so a slower-but-better arch gets
+    # the SAME amount of training as a fast one (fair comparison). 'wall_s' keeps
+    # the legacy behavior (run all epochs; the harness timeout is the cap).
+    _budget = SPEC.get('compute_budget', {'mode': 'wall_s', 'limit': 0})
+    max_steps = _budget['limit'] if _budget.get('mode') == 'grad_steps' else None
+    global_step = 0
+    budget_hit = False
     if total_epochs > 0:
         import warnings
         with warnings.catch_warnings():
@@ -446,7 +456,9 @@ def train(epochs=300, lr=0.002, save_best=False, batch_size=8192, quant_target_e
 
             # QT ramp based on global epoch count so resume doesn't reset
             global_epoch = total_epochs + epoch
-            quant_temp = 0.3 + 0.7 * min(1.0, global_epoch / (quant_target_epoch * 0.4))
+            _qt0 = SPEC['qt_start']
+            quant_temp = _qt0 + (1 - _qt0) * min(
+                1.0, global_epoch / (quant_target_epoch * SPEC['qt_ramp_factor']))
 
             # Shuffle indices each epoch (on GPU to avoid CPU-GPU sync)
             perm = torch.randperm(n_examples, device=device)
@@ -466,14 +478,18 @@ def train(epochs=300, lr=0.002, save_best=False, batch_size=8192, quant_target_e
 
                 outputs = model(X_batch, positions=pos_batch, quant_temp=quant_temp)
                 ce_loss = criterion(outputs, y_batch)
-                quant_loss = model.compute_quantization_loss() * 0.25
+                quant_loss = model.compute_quantization_loss() * SPEC['quant_loss_weight']
 
                 loss = ce_loss + quant_loss
                 loss.backward()
                 optimizer.step()
+                global_step += 1
 
                 epoch_loss += ce_loss.item() * (end - start)
                 epoch_correct += (outputs.argmax(dim=1) == y_batch).sum().item()
+                if max_steps and global_step >= max_steps:
+                    budget_hit = True
+                    break
 
             current_epoch = total_epochs + epoch + 1
             avg_loss = epoch_loss / n_examples
@@ -509,10 +525,19 @@ def train(epochs=300, lr=0.002, save_best=False, batch_size=8192, quant_target_e
 
             scheduler.step()
 
+            if budget_hit:
+                print(f"  [compute] grad-step budget reached "
+                      f"({global_step}/{max_steps}) — stopping")
+                break
+
         except KeyboardInterrupt:
             print("\nInterrupted!")
             interrupted = True
             break
+
+    # One grep-able compute line for the harness to log (mode/steps/limit/hit).
+    print(f"[compute] mode={_budget.get('mode')} steps={global_step} "
+          f"limit={_budget.get('limit')} hit={1 if budget_hit else 0}")
 
     total_epochs += epoch + 1
 
@@ -554,6 +579,10 @@ def train(epochs=300, lr=0.002, save_best=False, batch_size=8192, quant_target_e
         'best_int_acc': best_int_acc,
         'best_epoch': best_epoch,
         'dual_bias_threshold': DUAL_BIAS_THRESHOLD,
+        'grad_steps_run': global_step,
+        'compute_mode': _budget.get('mode'),
+        'budget_limit': _budget.get('limit'),
+        'budget_hit': budget_hit,
     }, CHECKPOINT_FILE)
     print(f"Saved {save_note} → {CHECKPOINT_FILE} "
           f"(epochs: {total_epochs}, best: {best_int_acc:.1%} @ {best_epoch})")
