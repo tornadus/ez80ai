@@ -32,8 +32,26 @@ class StraightThroughEstimator(torch.autograd.Function):
         return grad_output, None
 
 
+# Weight grid (2-bit, 4 codes). Default {-2,-1,0,+1}. A zero-free grid {-2,-1,+1,+2}
+# (experiment) removes the 0 code so every weight carries a sign — addresses the
+# measured ~64% deadzone (weights trapped at 0 contribute nothing). NeochatModel sets
+# this module flag from spec['weight_grid'] at construction so both the QAT path
+# (here) and the reference integer path (train._forward_int) stay consistent.
+_ZERO_FREE_GRID = False
+
+
+def _grid_round(w_scaled: torch.Tensor) -> torch.Tensor:
+    """Round scaled weights to the active 2-bit code grid."""
+    if _ZERO_FREE_GRID:
+        s = torch.sign(w_scaled)
+        s = torch.where(s == 0, torch.ones_like(s), s)
+        m = torch.clamp(torch.round(w_scaled.abs()), 1, 2)   # {1,2}
+        return s * m                                          # {-2,-1,+1,+2}
+    return torch.clamp(torch.round(w_scaled), -2, 1)          # {-2,-1,0,+1}
+
+
 def quantize_weights_2bit(w: torch.Tensor, hard: bool = True, temperature: float = 1.0) -> torch.Tensor:
-    """Quantize weights to 2-bit: {-2, -1, 0, +1} (4 values for 2 bits)
+    """Quantize weights to a 2-bit grid (4 codes; grid set by _ZERO_FREE_GRID).
 
     Args:
         w: Weights tensor
@@ -45,7 +63,7 @@ def quantize_weights_2bit(w: torch.Tensor, hard: bool = True, temperature: float
 
     scale = torch.quantile(w.abs().flatten(), 0.85).clamp(min=1e-6)
     w_scaled = w / scale
-    w_quant = torch.clamp(torch.round(w_scaled), -2, 1) * scale
+    w_quant = _grid_round(w_scaled) * scale
 
     if temperature >= 1.0:
         if hard:
@@ -61,10 +79,10 @@ def quantize_weights_2bit(w: torch.Tensor, hard: bool = True, temperature: float
 
 
 def quantization_friendly_loss(w: torch.Tensor) -> torch.Tensor:
-    """Loss that encourages weights to be close to quantization grid {-2,-1,0,+1}."""
+    """Loss that encourages weights to be close to the active quantization grid."""
     scale = torch.quantile(w.abs().flatten(), 0.85).clamp(min=1e-6)
     w_scaled = w / scale
-    w_rounded = torch.clamp(torch.round(w_scaled), -2, 1)
+    w_rounded = _grid_round(w_scaled)
     distance = (w_scaled - w_rounded).abs()
     return distance.mean()
 

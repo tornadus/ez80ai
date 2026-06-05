@@ -25,6 +25,7 @@ import torch.nn as nn
 # Force unbuffered output so background runs are monitorable
 sys.stdout.reconfigure(line_buffering=True)
 
+import libqat
 from libqat import OverflowAwareLinear, quantize_weights_2bit
 from encoding import (
     TrigramEncoder, ContextEncoder,
@@ -116,6 +117,10 @@ class NeochatModel(nn.Module):
         # the sim stays config-driven and in lockstep with the build. Defaults to
         # the module spec; eval can pass a model's frozen baked spec instead.
         self.spec = spec if spec is not None else SPEC
+        # Select the 2-bit weight grid (default {-2,-1,0,1} vs zero-free {-2,-1,1,2}).
+        # Module-level flag keeps the QAT quantizer (libqat) consistent with the
+        # reference integer path (_forward_int) below.
+        libqat._ZERO_FREE_GRID = (self.spec.get('weight_grid', 'default') == 'zero_free')
 
         # Hidden layers
         self.layers = nn.ModuleList()
@@ -195,10 +200,17 @@ class NeochatModel(nn.Module):
         half = 1 << (spec['accum_bits'] - 1)
         mod = 1 << spec['accum_bits']
 
+        zero_free = spec.get('weight_grid', 'default') == 'zero_free'
+
         def quant(w, b):
             scale = torch.quantile(w.abs().flatten(), q).clamp(min=1e-6)
+            r = torch.round(w / scale)
+            if zero_free and b == 2:
+                s = torch.sign(w)
+                s = torch.where(s == 0, torch.ones_like(s), s)
+                return s * torch.clamp(r.abs(), 1, 2)        # zero-free {-2,-1,+1,+2}
             lo, hi = -(1 << (b - 1)), (1 << (b - 1)) - 1
-            return torch.clamp(torch.round(w / scale), lo, hi)
+            return torch.clamp(r, lo, hi)                    # default {-2,-1,0,+1}
 
         def wrap(t):
             return ((t + half) % mod) - half

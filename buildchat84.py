@@ -321,6 +321,8 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
     assert spec['query_ngram_orders'] == [3], "emitted tokenizer is trigram-query only"
     assert not spec.get('signed_hash', False), \
         "signed count-sketch hashing not yet in eZ80 codegen (sim-probe only for now)"
+    assert spec.get('weight_grid', 'default') == 'default', \
+        "zero-free weight grid not yet in eZ80 weight-unpack codegen (sim-probe only)"
     assert len(shifts) == num_layers, (len(shifts), num_layers)
     assert len(wbits) == num_layers, (len(wbits), num_layers)
     MAX_AV = sizes.MAX_APPVAR_BYTES

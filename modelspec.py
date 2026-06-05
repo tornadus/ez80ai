@@ -49,6 +49,7 @@ DEFAULT_SPEC = {
     "inter_layer_shift": 2,                  # right-shift after each layer (÷4 == 2)
     "activation_scale": 32,                  # fixed-point input scale
     "rounding": "trunc",                     # 'trunc' (sim today) | 'floor' (device)
+    "weight_grid": "default",                # 'default' {-2,-1,0,1} | 'zero_free' {-2,-1,1,2}
     "accum_bits": 24,                        # eZ80 native accumulator width
 
     # --- output bias ---
@@ -147,6 +148,8 @@ def validate(spec):
         raise SpecError("inter_layer_shift entries must be >= 0")
     if spec["rounding"] not in ("trunc", "floor"):
         raise SpecError(f"rounding must be 'trunc' or 'floor', got {spec['rounding']}")
+    if spec.get("weight_grid", "default") not in ("default", "zero_free"):
+        raise SpecError(f"weight_grid must be 'default' or 'zero_free', got {spec.get('weight_grid')}")
     if spec["activation"] != "relu":
         raise SpecError(f"activation '{spec['activation']}' not implemented "
                         f"(needs a kernel + codegen addition)")
