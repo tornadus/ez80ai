@@ -360,9 +360,20 @@ def train(epochs=300, lr=0.002, save_best=False, batch_size=8192, quant_target_e
     print(f"Architecture: {INPUT_SIZE} → {' → '.join(map(str, HIDDEN_SIZES))} → {NUM_CHARS}")
     print(f"Dual bias threshold: first {DUAL_BIAS_THRESHOLD} chars use bias_start")
 
-    query_encoder = TrigramEncoder(num_buckets=SPEC['query_buckets'])
+    # Encoding is a DOF: thread the spec's n-gram orders + hash params so training
+    # matches intkernel/the build exactly (avoids the train-vs-build skew that hit
+    # when only num_buckets/context_len were spec-driven).
+    query_encoder = TrigramEncoder(num_buckets=SPEC['query_buckets'],
+                                   ngram_orders=SPEC['query_ngram_orders'],
+                                   hash_mult=SPEC['query_hash']['mult'],
+                                   hash_mask=SPEC['query_hash']['mask'],
+                                   pos_offset_mult=SPEC['query_hash']['pos_offset_mult'])
     context_encoder = ContextEncoder(num_buckets=SPEC['context_buckets'],
-                                     context_len=SPEC['context_len'])
+                                     context_len=SPEC['context_len'],
+                                     ngram_orders=SPEC['context_ngram_orders'],
+                                     hash_mult=SPEC['context_hash']['mult'],
+                                     hash_mask=SPEC['context_hash']['mask'],
+                                     pos_offset_mult=SPEC['context_hash']['pos_offset_mult'])
 
     # Generate all character-level examples upfront (CPU)
     print("Generating character examples...")

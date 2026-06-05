@@ -11,61 +11,77 @@ from typing import List, Tuple, Callable, Optional
 
 
 class TrigramEncoder:
-    """Encode text into trigram hash buckets (integer-friendly, no normalization)."""
+    """Encode query text into n-gram hash buckets (integer-friendly, no
+    normalization).
 
-    def __init__(self, num_buckets: int = 128):
+    SPEC-DRIVEN (skew fix): the n-gram orders and hash params come from the model
+    spec, so train.py and ez80research/evaluate.py reproduce intkernel.tokenize_query
+    (and therefore the eZ80 build) EXACTLY. The old version hardcoded trigrams +
+    mult=31/mask=0xFFFF, so changing query_ngram_orders/query_hash in the spec
+    silently affected only the build/intkernel — a train-vs-build skew. Defaults
+    reproduce the original trigram behavior byte-for-byte (pos_offset_mult=0, and
+    h & (n-1) == h % n for power-of-two bucket counts)."""
+
+    def __init__(self, num_buckets: int = 128, ngram_orders=(3,),
+                 hash_mult: int = 31, hash_mask: int = 0xFFFF,
+                 pos_offset_mult: int = 0):
         self.num_buckets = num_buckets
+        self.ngram_orders = tuple(ngram_orders)
+        self.hash_mult = hash_mult
+        self.hash_mask = hash_mask
+        self.pos_offset_mult = pos_offset_mult
 
-    def _hash_trigram(self, trigram: str) -> int:
-        """Hash a trigram to a bucket index."""
-        h = 0
-        for c in trigram:
-            h = (h * 31 + ord(c)) & 0xFFFF
-        return h % self.num_buckets
+    def _hash_ngram(self, ngram: str, pos: int) -> int:
+        h = pos & self.hash_mask
+        for c in ngram:
+            h = (h * self.hash_mult + ord(c)) & self.hash_mask
+        return h
 
     def encode(self, text: str) -> np.ndarray:
         """Encode text into bucket counts (raw counts)."""
         vec = np.zeros(self.num_buckets, dtype=np.float32)
-        text = text.lower()
-        text = ' ' + text + ' '  # Pad for boundary trigrams
-
-        for i in range(len(text) - 2):
-            trigram = text[i:i+3]
-            bucket = self._hash_trigram(trigram)
-            vec[bucket] += 1.0
-
+        text = ' ' + text.lower() + ' '  # 1-space pad both ends (boundary n-grams)
+        for n in self.ngram_orders:
+            for i in range(len(text) - n + 1):
+                pos = (i * self.pos_offset_mult) & self.hash_mask
+                h = self._hash_ngram(text[i:i + n], pos)
+                vec[h & (self.num_buckets - 1)] += 1.0
         return vec
 
 
 class ContextEncoder:
-    """Encode recent output characters into hash buckets (integer-friendly)."""
+    """Encode recent output characters into n-gram hash buckets (integer-friendly).
 
-    def __init__(self, num_buckets: int = 128, context_len: int = 8):
+    SPEC-DRIVEN (skew fix): n-gram orders / hash params come from the spec so
+    train/eval reproduce intkernel.encode_context (and the eZ80 build) EXACTLY.
+    Defaults reproduce the original [1,2,3] / mult=31 / offset*7 behavior byte-for-
+    byte."""
+
+    def __init__(self, num_buckets: int = 128, context_len: int = 8,
+                 ngram_orders=(1, 2, 3), hash_mult: int = 31,
+                 hash_mask: int = 0xFFFF, pos_offset_mult: int = 7):
         self.num_buckets = num_buckets
         self.context_len = context_len
+        self.ngram_orders = tuple(ngram_orders)
+        self.hash_mult = hash_mult
+        self.hash_mask = hash_mask
+        self.pos_offset_mult = pos_offset_mult
 
-    def _hash_ngram(self, ngram: str, offset: int = 0) -> int:
-        """Hash an n-gram with position offset."""
-        h = offset * 7
+    def _hash_ngram(self, ngram: str, pos: int) -> int:
+        h = pos & self.hash_mask
         for c in ngram:
-            h = (h * 31 + ord(c)) & 0xFFFF
-        return h % self.num_buckets
+            h = (h * self.hash_mult + ord(c)) & self.hash_mask
+        return h
 
     def encode(self, recent_chars: str) -> np.ndarray:
         """Encode recent output characters (raw counts)."""
         vec = np.zeros(self.num_buckets, dtype=np.float32)
-
-        # Pad to context_len
-        recent = recent_chars[-self.context_len:].lower()
-        recent = recent.rjust(self.context_len)
-
-        # Hash character n-grams with position info
-        for n in [1, 2, 3]:  # Unigrams, bigrams, trigrams
+        recent = recent_chars[-self.context_len:].lower().rjust(self.context_len)
+        for n in self.ngram_orders:
             for i in range(len(recent) - n + 1):
-                ngram = recent[i:i+n]
-                bucket = self._hash_ngram(ngram, offset=i)
-                vec[bucket] += 1.0
-
+                pos = (i * self.pos_offset_mult) & self.hash_mask
+                h = self._hash_ngram(recent[i:i + n], pos)
+                vec[h & (self.num_buckets - 1)] += 1.0
         return vec
 
 
