@@ -125,20 +125,36 @@ SCAN_TO_ASCII[SK_DECPNT] = ord('.') # [.] -> .
 SCAN_TO_ASCII[SK_ADD] = ord('!')    # [+] -> !
 
 
+def pack_weights(weights: np.ndarray, bits: int = 2) -> bytes:
+    """Pack `bits`-bit signed weights, 8//bits codes per byte, LSB first.
+
+    Each weight w in [-2^(bits-1), 2^(bits-1)-1] is stored as the unsigned code
+    w + 2^(bits-1) (so 0 -> the mid code). The final partial byte is padded with
+    the zero-code. bits=2 -> 4/byte (codes pad with 2 -> 0xAA all-zero sentinel);
+    bits=4 -> 2/byte (pad with 8 -> 0x88 sentinel)."""
+    off = 1 << (bits - 1)
+    cpb = 8 // bits
+    lo, hi = -off, off - 1
+    mapped = (np.clip(weights.flatten(), lo, hi) + off).astype(np.uint8)
+    pad = (-len(mapped)) % cpb
+    if pad:
+        mapped = np.concatenate([mapped, np.full(pad, off, dtype=np.uint8)])
+    mapped = mapped.reshape(-1, cpb)
+    shifts = np.arange(cpb, dtype=np.uint16) * bits
+    return (mapped.astype(np.uint16) << shifts).sum(axis=1).astype(np.uint8).tobytes()
+
+
+def zero_byte(bits: int) -> int:
+    """The packed byte whose every code is the zero-weight code (the zero-skip
+    sentinel). bits=2 -> 0xAA, bits=4 -> 0x88."""
+    off = 1 << (bits - 1)
+    cpb = 8 // bits
+    return sum(off << (k * bits) for k in range(cpb))
+
+
+# Back-compat alias (2-bit).
 def pack_2bit_weights(weights: np.ndarray) -> bytes:
-    """Pack 2-bit weights: 4 per byte, LSB first (same as ZX Spectrum version)"""
-    flat = weights.flatten()
-    mapped = np.clip(flat + 2, 0, 3).astype(np.uint8)
-
-    packed = []
-    for i in range(0, len(mapped), 4):
-        chunk = mapped[i:i+4]
-        if len(chunk) < 4:
-            chunk = np.pad(chunk, (0, 4 - len(chunk)), constant_values=2)
-        byte = int(chunk[0]) | (int(chunk[1]) << 2) | (int(chunk[2]) << 4) | (int(chunk[3]) << 6)
-        packed.append(byte)
-
-    return bytes(packed)
+    return pack_weights(weights, 2)
 
 
 def build_8xp(code: bytes, name: str) -> bytes:
@@ -288,8 +304,10 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
     # is a multiple of 4 under 2-bit packing (asserted below).
     spec = load_spec_from_model(model_path)
     shifts = spec['inter_layer_shift']
+    wbits = spec['weight_bits']               # per-layer weight bit-width
     ascale = spec['activation_scale']
     assert len(shifts) == num_layers, (len(shifts), num_layers)
+    assert len(wbits) == num_layers, (len(wbits), num_layers)
     MAX_AV = sizes.MAX_APPVAR_BYTES
     out_name = layer_names[-1]
 
@@ -315,20 +333,21 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
         assert n_in % 4 == 0, f"layer {li} input dim {n_in} must be a multiple of 4"
         is_out = (li == num_layers - 1)
         bias_sets = 2 if (is_out and has_dual_bias) else 1
-        layer_bytes = (n_out * n_in) // 4 + n_out * 2 * bias_sets
+        layer_bytes = (n_out * n_in * wbits[li]) // 8 + n_out * 2 * bias_sets
         nsplit = max(1, -(-layer_bytes // MAX_AV))
         base, rem, lo, ranges = n_out // nsplit, n_out % nsplit, 0, []
         for k in range(nsplit):
             sz = base + (1 if k < rem else 0)
             ranges.append((lo, lo + sz)); lo += sz
         layer_plan.append({'li': li, 'n_in': n_in, 'n_out': n_out,
-                           'shift': shifts[li], 'is_out': is_out, 'shards': []})
+                           'shift': shifts[li], 'bits': wbits[li],
+                           'is_out': is_out, 'shards': []})
         for (a, c) in ranges:
             flat_shards.append((li, a, c))
 
     def shard_blobs(li, lo, hi):
         name = layer_names[li]
-        wb = pack_2bit_weights(params[f'{name}_weight'][lo:hi, :])
+        wb = pack_weights(params[f'{name}_weight'][lo:hi, :], wbits[li])
         if li == num_layers - 1:                       # output: bias pre-scaled
             sh = shifts[li]
             brest = pack_bias_bytes(params[f'{name}_bias'][lo:hi] * (1 << sh))
@@ -900,7 +919,7 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
     # buffers (output offset for split layers), dimensions, and the per-layer
     # right-shift (LSHIFT, applied at runtime in LAYER), then jumps to LAYER.
     def emit_stub(label, av_idx, w_off, b_off, in_buf, out_buf, out_off,
-                  in_size, out_size, shift):
+                  in_size, out_size, shift, bits):
         b.label(label)
         b.ld_hl_mem_label(f'AVPTR{av_idx}')        # HL = weight pointer
         if w_off > 0:
@@ -924,20 +943,21 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
         b.ld_hl_nn(in_size); b.ld_mem_label_hl('INCNT')
         b.pop_hl()
         b.ld_a_n(shift); b.ld_mem_label_a('LSHIFT')  # per-layer right-shift
-        b.jp('LAYER')
+        b.jp(f'LAYER_B{bits}')                        # per-bit-width LAYER variant
 
     for plan in layer_plan:
-        li, in_buf, out_buf, shift = plan['li'], plan['in_buf'], plan['out_buf'], plan['shift']
+        li, in_buf, out_buf = plan['li'], plan['in_buf'], plan['out_buf']
+        shift, bits = plan['shift'], plan['bits']
         for k, sh in enumerate(plan['shards']):
             in_size, out_size, out_off = plan['n_in'], sh['hi'] - sh['lo'], sh['lo'] * 2
             if plan['is_out']:
                 emit_stub(f'L{li}_R{k}', sh['av'], sh['w_off'], sh['b_off'],
-                          in_buf, out_buf, out_off, in_size, out_size, shift)
+                          in_buf, out_buf, out_off, in_size, out_size, shift, bits)
                 emit_stub(f'L{li}_S{k}', sh['av'], sh['w_off'], sh['bs_off'],
-                          in_buf, out_buf, out_off, in_size, out_size, shift)
+                          in_buf, out_buf, out_off, in_size, out_size, shift, bits)
             else:
                 emit_stub(f'L{li}_{k}', sh['av'], sh['w_off'], sh['b_off'],
-                          in_buf, out_buf, out_off, in_size, out_size, shift)
+                          in_buf, out_buf, out_off, in_size, out_size, shift, bits)
 
     # === FORWARD: full forward pass (all layers + genpos-selected output) ===
     b.label('FORWARD')
@@ -959,162 +979,172 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
         b.call(f"L{out_plan['li']}_R{k}")
     b.ret()
 
-    # === LAYER: Neural network layer computation ===
-    # 24-bit native accumulator
-    b.label('LAYER')
-    b.ld_mem_label_hl('SAVW')         # weight pointer -> SAVW (safe LD (nn),HL)
-    # Bias pointer is in DE. ED-53 (LD (nn),DE) can corrupt adjacent memory on
-    # real hardware (libez80 caveat #2); SAVW is already stored, so HL is free --
-    # move the bias pointer into HL and store via the safe LD (nn),HL (0x22).
-    b.ex_de_hl()
-    b.ld_mem_label_hl('SAVB')
+    # === LAYER: neural-net layer computation (one variant per weight bit-width) ===
+    # 24-bit native accumulator. The decode (LWT/LSAME) is bit-width-specific:
+    # 8//bits codes per packed byte, code = w + 2^(bits-1), zero-skip sentinel =
+    # zero_byte(bits). 2-bit uses the fast special-cased MULADD; wider widths use
+    # the general multiply MULADD_GEN. Internal labels are suffixed per variant.
+    def emit_layer_routine(bits):
+        sfx = f'_B{bits}'
+        cpb = 8 // bits                 # codes per packed byte
+        mask = (1 << bits) - 1
+        off = 1 << (bits - 1)           # zero-code offset
+        zb = zero_byte(bits)            # all-zero-weights sentinel byte
+        muladd = 'MULADD' if bits == 2 else 'MULADD_GEN'
 
-    b.label('LNEUR')
-    b.ld_hl_nn(0)
-    b.ld_mem_label_hl('ACC')
-    b.push_ix()
-    b.pop_hl()
-    b.ld_mem_label_hl('CURIN')
-    b.ld_de_nn(0)
-    b.ld_hl_mem_label('SAVW')
-    b.push_hl()
-    b.ld_hl_mem_label('INCNT')
-    b.ld_mem_label_hl('WTCNT')
-    b.pop_hl()
-    b.ld_c_n(0)
+        b.label(f'LAYER_B{bits}')
+        b.ld_mem_label_hl('SAVW')       # weight pointer -> SAVW (safe LD (nn),HL)
+        b.ex_de_hl()                    # bias pointer (DE) -> SAVB via HL (caveat #2)
+        b.ld_mem_label_hl('SAVB')
 
-    b.label('LWT')
-    b.ld_a_c()
-    b.and_n(0x03)
-    b.jr_nz('LSAME')
-    b.ld_hl_mem_label('SAVW')
-    b.ld_a_hl()
-    b.ld_mem_label_a('PACKED')
-    b.inc_hl()
-    b.ld_mem_label_hl('SAVW')
+        b.label(f'LNEUR{sfx}')
+        b.ld_hl_nn(0)
+        b.ld_mem_label_hl('ACC')
+        b.push_ix()
+        b.pop_hl()
+        b.ld_mem_label_hl('CURIN')
+        b.ld_de_nn(0)
+        b.ld_hl_mem_label('SAVW')
+        b.push_hl()
+        b.ld_hl_mem_label('INCNT')
+        b.ld_mem_label_hl('WTCNT')
+        b.pop_hl()
+        b.ld_c_n(0)
 
-    # ZERO-SKIP: if packed byte is 0xAA, all 4 weights are zero
-    b.cp_n(0xAA)
-    b.jr_nz('LSAME')
+        b.label(f'LWT{sfx}')
+        b.ld_a_c()
+        b.and_n(cpb - 1)                # load a new packed byte every cpb weights
+        b.jr_nz(f'LSAME{sfx}')
+        b.ld_hl_mem_label('SAVW')
+        b.ld_a_hl()
+        b.ld_mem_label_a('PACKED')
+        b.inc_hl()
+        b.ld_mem_label_hl('SAVW')
 
-    b.ld_hl_mem_label('CURIN')
-    b.ld_de_nn(8)
-    b.add_hl_de()
-    b.ld_mem_label_hl('CURIN')
-    b.ld_a_c()
-    b.add_a_n(4)
-    b.ld_c_a()
-    b.push_hl()
-    b.ld_hl_mem_label('WTCNT')
-    b.dec_hl()
-    b.dec_hl()
-    b.dec_hl()
-    b.dec_hl()
-    b.ld_mem_label_hl('WTCNT')
-    b.ld_a_h()
-    b.or_l()
-    b.pop_hl()
-    b.jp_nz('LWT')
-    b.jp('LWT_DONE')
+        # ZERO-SKIP: packed byte == sentinel -> all cpb weights are zero
+        b.cp_n(zb)
+        b.jr_nz(f'LSAME{sfx}')
 
-    b.label('LSAME')
-    b.ld_a_mem_label('PACKED')
-    b.and_n(0x03)
-    b.sub_n(2)
-    b.ld_mem_label_a('WEIGHT')
-    b.ld_a_mem_label('PACKED')
-    b.rrca()
-    b.rrca()
-    b.ld_mem_label_a('PACKED')
-    b.ld_hl_mem_label('CURIN')
-    b.ld_e_hl()
-    b.inc_hl()
-    b.ld_d_hl()
-    b.inc_hl()
-    b.ld_mem_label_hl('CURIN')
-    b.ld_a_mem_label('WEIGHT')
-    b.call('MULADD')
-    b.inc_c()
-    b.push_hl()
-    b.ld_hl_mem_label('WTCNT')
-    b.dec_hl()
-    b.ld_mem_label_hl('WTCNT')
-    b.ld_a_h()
-    b.or_l()
-    b.pop_hl()
-    b.jp_nz('LWT')
+        b.ld_hl_mem_label('CURIN')
+        b.ld_de_nn(cpb * 2)            # advance input past cpb skipped weights
+        b.add_hl_de()
+        b.ld_mem_label_hl('CURIN')
+        b.ld_a_c()
+        b.add_a_n(cpb)
+        b.ld_c_a()
+        b.push_hl()
+        b.ld_hl_mem_label('WTCNT')
+        for _ in range(cpb):
+            b.dec_hl()
+        b.ld_mem_label_hl('WTCNT')
+        b.ld_a_h()
+        b.or_l()
+        b.pop_hl()
+        b.jp_nz(f'LWT{sfx}')
+        b.jp(f'LWT_DONE{sfx}')
 
-    b.label('LWT_DONE')
+        b.label(f'LSAME{sfx}')
+        b.ld_a_mem_label('PACKED')
+        b.and_n(mask)
+        b.sub_n(off)                   # code -> signed weight
+        b.ld_mem_label_a('WEIGHT')
+        b.ld_a_mem_label('PACKED')
+        for _ in range(bits):          # shift to the next code
+            b.rrca()
+        b.ld_mem_label_a('PACKED')
+        b.ld_hl_mem_label('CURIN')
+        b.ld_e_hl()
+        b.inc_hl()
+        b.ld_d_hl()
+        b.inc_hl()
+        b.ld_mem_label_hl('CURIN')
+        b.ld_a_mem_label('WEIGHT')
+        b.call(muladd)
+        b.inc_c()
+        b.push_hl()
+        b.ld_hl_mem_label('WTCNT')
+        b.dec_hl()
+        b.ld_mem_label_hl('WTCNT')
+        b.ld_a_h()
+        b.or_l()
+        b.pop_hl()
+        b.jp_nz(f'LWT{sfx}')
 
-    # Post inner loop: add bias THEN divide by 4
-    b.ld_hl_label('ACC')
-    b.ld_e_hl()
-    b.inc_hl()
-    b.ld_d_hl()
-    b.inc_hl()
-    b.ld_a_hl()
+        b.label(f'LWT_DONE{sfx}')
 
-    b.ld_hl_mem_label('SAVB')
-    b.ld_c_hl()                       # LD C, (HL)
-    b.inc_hl()
-    b.ld_b_hl()
-    b.inc_hl()
-    b.ld_mem_label_hl('SAVB')
+        # Post inner loop: add bias THEN shift (output bias is pre-scaled, so this
+        # matches (matmul >> shift) + bias for the output layer too).
+        b.ld_hl_label('ACC')
+        b.ld_e_hl()
+        b.inc_hl()
+        b.ld_d_hl()
+        b.inc_hl()
+        b.ld_a_hl()
 
-    b.ld_h_a()
-    b.ld_a_e()
-    b.add_a_c()                      # ADD A, C
-    b.ld_e_a()
-    b.ld_a_d()
-    b.adc_a_b()                      # ADC A, B
-    b.ld_d_a()
-    b.push_af()
-    b.ld_a_b()
-    b.add_a_a()
-    b.sbc_a_a()                      # SBC A, A
-    b.ld_b_a()
-    b.pop_af()
-    b.ld_a_h()
-    b.adc_a_b()                      # ADC A, B
+        b.ld_hl_mem_label('SAVB')
+        b.ld_c_hl()                       # LD C, (HL)
+        b.inc_hl()
+        b.ld_b_hl()
+        b.inc_hl()
+        b.ld_mem_label_hl('SAVB')
 
-    # Arithmetic right shift by LSHIFT (per-layer divide; SRA;RR;RR = floor).
-    # Value is in A:D:E (high:mid:low); the loop preserves it across the counter
-    # load via push_af/pop_af. shift==0 -> no shift.
-    b.push_af()
-    b.ld_a_mem_label('LSHIFT')
-    b.ld_mem_label_a('LSHIFT_CNT')
-    b.pop_af()
-    b.label('LSH_LOOP')
-    b.push_af()
-    b.ld_a_mem_label('LSHIFT_CNT')
-    b.or_a()
-    b.jr_z('LSH_DONE')
-    b.dec_a()
-    b.ld_mem_label_a('LSHIFT_CNT')
-    b.pop_af()
-    b.sra_a()                         # SRA A
-    b.rr_d()                          # RR D
-    b.rr_e()                          # RR E
-    b.jr('LSH_LOOP')
-    b.label('LSH_DONE')
-    b.pop_af()
+        b.ld_h_a()
+        b.ld_a_e()
+        b.add_a_c()                      # ADD A, C
+        b.ld_e_a()
+        b.ld_a_d()
+        b.adc_a_b()                      # ADC A, B
+        b.ld_d_a()
+        b.push_af()
+        b.ld_a_b()
+        b.add_a_a()
+        b.sbc_a_a()                      # SBC A, A
+        b.ld_b_a()
+        b.pop_af()
+        b.ld_a_h()
+        b.adc_a_b()                      # ADC A, B
 
-    # Store result to output buffer
-    b.ld_iyd_e(0x00)                 # LD (IY+0), E
-    b.ld_iyd_d(0x01)                 # LD (IY+1), D
-    b.inc_iy()
-    b.inc_iy()
+        # Arithmetic right shift by LSHIFT (per-layer divide; SRA;RR;RR = floor).
+        # Value is in A:D:E (high:mid:low); preserved across the counter load via
+        # push_af/pop_af. shift==0 -> no shift.
+        b.push_af()
+        b.ld_a_mem_label('LSHIFT')
+        b.ld_mem_label_a('LSHIFT_CNT')
+        b.pop_af()
+        b.label(f'LSH_LOOP{sfx}')
+        b.push_af()
+        b.ld_a_mem_label('LSHIFT_CNT')
+        b.or_a()
+        b.jr_z(f'LSH_DONE{sfx}')
+        b.dec_a()
+        b.ld_mem_label_a('LSHIFT_CNT')
+        b.pop_af()
+        b.sra_a()                         # SRA A
+        b.rr_d()                          # RR D
+        b.rr_e()                          # RR E
+        b.jr(f'LSH_LOOP{sfx}')
+        b.label(f'LSH_DONE{sfx}')
+        b.pop_af()
 
-    # Outer loop: decrement neuron counter
-    b.push_hl()
-    b.ld_hl_mem_label('NEURCNT')
-    b.dec_hl()
-    b.ld_mem_label_hl('NEURCNT')
-    b.ld_a_h()
-    b.or_l()
-    b.pop_hl()
-    b.jp_nz('LNEUR')
-    b.ret()
+        # Store result to output buffer
+        b.ld_iyd_e(0x00)                 # LD (IY+0), E
+        b.ld_iyd_d(0x01)                 # LD (IY+1), D
+        b.inc_iy()
+        b.inc_iy()
+
+        # Outer loop: decrement neuron counter
+        b.push_hl()
+        b.ld_hl_mem_label('NEURCNT')
+        b.dec_hl()
+        b.ld_mem_label_hl('NEURCNT')
+        b.ld_a_h()
+        b.or_l()
+        b.pop_hl()
+        b.jp_nz(f'LNEUR{sfx}')
+        b.ret()
+
+    for bits in sorted(set(wbits)):
+        emit_layer_routine(bits)
 
     # === MULADD: Multiply-accumulate (24-bit native) ===
     b.label('MULADD')
@@ -1155,6 +1185,33 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
 
     b.label('MA_RET')
     b.ret()
+
+    # === MULADD_GEN: general signed multiply-accumulate (for >2-bit weights) ===
+    # A = signed weight, DE = input value, ACC += A*DE via |A| add/subtract steps.
+    # Only emitted (and only called) when some layer uses a bit-width other than 2.
+    if any(bt != 2 for bt in wbits):
+        b.label('MULADD_GEN')
+        b.or_a()
+        b.ret_z()                        # weight 0 -> nothing
+        b.jp_m('MAG_NEG')
+        b.ld_b_a()                        # B = weight (positive); loop B times
+        b.label('MAG_PLOOP')
+        b.ld_hl_mem_label('ACC')
+        b.add_hl_de()
+        b.ld_mem_label_hl('ACC')
+        b.djnz('MAG_PLOOP')
+        b.ret()
+        b.label('MAG_NEG')
+        b.cpl()                           # A = -weight = |weight|
+        b.inc_a()
+        b.ld_b_a()
+        b.label('MAG_NLOOP')
+        b.ld_hl_mem_label('ACC')
+        b.or_a()                          # clear carry before each SBC
+        b.sbc_hl_de()
+        b.ld_mem_label_hl('ACC')
+        b.djnz('MAG_NLOOP')
+        b.ret()
 
     # === ReLU (HL = buffer pointer, BC = element count; set by FORWARD) ===
     b.label('RELU')
