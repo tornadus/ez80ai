@@ -278,8 +278,10 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
     input_size = layer_sizes[0]   # 256 (128 query + 128 context)
     output_size = layer_sizes[-1]
 
+    _spec_pre = load_spec_from_model(model_path)
     print(f"Architecture: {' -> '.join(map(str, layer_sizes))}")
-    print(f"Input: {input_size} (128 query + 128 context)")
+    print(f"Input: {input_size} ({_spec_pre['query_buckets']} query + "
+          f"{_spec_pre['context_buckets']} context)")
     print(f"Output: {output_size} characters")
 
     # Check for dual bias on the OUTPUT layer (its name is fcN, not hardcoded fc4).
@@ -306,6 +308,17 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
     shifts = spec['inter_layer_shift']
     wbits = spec['weight_bits']               # per-layer weight bit-width
     ascale = spec['activation_scale']
+    qb = spec['query_buckets']                # encoding is a DOF (P5)
+    cb = spec['context_buckets']
+    clen = spec['context_len']
+    ctx_orders = spec['context_ngram_orders']
+    ctx_max_order = max(ctx_orders)
+    assert (qb & (qb - 1)) == 0 and (cb & (cb - 1)) == 0, "bucket counts must be pow2"
+    assert qb <= 256 and cb <= 256, \
+        "emitted tokenizer masks buckets with an 8-bit AND; bucket counts must be <= 256"
+    assert ctx_orders == list(range(1, ctx_max_order + 1)), \
+        "emitted tokenizer supports contiguous context n-gram orders 1..N only"
+    assert spec['query_ngram_orders'] == [3], "emitted tokenizer is trigram-query only"
     assert len(shifts) == num_layers, (len(shifts), num_layers)
     assert len(wbits) == num_layers, (len(wbits), num_layers)
     MAX_AV = sizes.MAX_APPVAR_BYTES
@@ -749,7 +762,7 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
     b.ld_hl_label('CTXCHARS')
     b.inc_hl()
     b.ld_de_label('CTXCHARS')
-    b.ld_bc_nn(7)
+    b.ld_bc_nn(clen - 1)
     b.ldir()
 
     # Store new character at end
@@ -767,7 +780,7 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
     b.add_a_n(0x20)
     b.label('UPD_STORE')
     b.ld_hl_label('CTXCHARS')
-    b.ld_de_nn(7)
+    b.ld_de_nn(clen - 1)
     b.add_hl_de()
     b.ld_hl_a()
 
@@ -776,16 +789,16 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
 
     # === ENCODE_CTX: Encode CTXCHARS into context buckets ===
     b.label('ENCODE_CTX')
-    # Clear context buckets (last 128 of TOKBUF)
+    # Clear context buckets (the cb buckets after the qb query buckets in TOKBUF)
     b.ld_hl_label('TOKBUF')
-    b.ld_de_nn(256)  # 128 buckets * 2 bytes
+    b.ld_de_nn(qb * 2)  # offset to context region = query_buckets * 2 bytes
     b.add_hl_de()
     b.push_hl()
     b.pop_de()
     b.inc_de()
     b.xor_a()
     b.ld_hl_a()
-    b.ld_bc_nn(255)  # 128*2 - 1
+    b.ld_bc_nn(cb * 2 - 1)  # context_buckets * 2 - 1
     b.ldir()
 
     # Hash n-grams
@@ -800,7 +813,7 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
     b.ld_mem_label_a('CTXPOS')
 
     b.label('CTX_PLOOP')
-    b.ld_a_n(9)
+    b.ld_a_n(clen + 1)             # positions for length-n: 0..clen-n  (< clen+1-n)
     b.ld_hl_label('CTXN')
     b.sub_hl_ind()
     b.ld_b_a()
@@ -819,7 +832,7 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
     b.ld_a_mem_label('CTXN')
     b.inc_a()
     b.ld_mem_label_a('CTXN')
-    b.cp_n(4)
+    b.cp_n(ctx_max_order + 1)      # context n-gram orders 1..ctx_max_order
     b.jr_c('CTX_NLOOP')
     b.ret()
 
@@ -876,16 +889,16 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
     b.pop_bc()
     b.djnz('CTX_HLOOP')
 
-    # bucket = (hash & 127) + 128
+    # bucket = (hash & (cb-1)); context region starts at TOKBUF + qb buckets
     b.ld_a_l()
-    b.and_n(127)
+    b.and_n(cb - 1)
 
-    # Add to bucket (context is at TOKBUF + 256)
+    # Add to bucket (context is at TOKBUF + query_buckets*2 bytes)
     b.ld_hl_nn(0)
     b.ld_l_a()
     b.add_hl_hl()
     b.ld_de_label('TOKBUF')
-    b.ld_bc_nn(256)
+    b.ld_bc_nn(qb * 2)
     b.add_hl_bc()
     b.add_hl_de()
 
@@ -907,7 +920,7 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
     b.label('CLEAR_CTX')
     b.ld_hl_label('CTXCHARS')
     b.ld_a_n(ord(' '))
-    for _ in range(8):
+    for _ in range(clen):
         b.ld_hl_a()
         b.inc_hl()
 
@@ -1308,12 +1321,12 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
     b.ld_mem_label_a('RESULT')
     b.ret()
 
-    # === TOKENIZE (query into first 128 buckets) ===
+    # === TOKENIZE (query into the first qb buckets of TOKBUF) ===
     b.label('TOKENIZE')
     b.ld_hl_label('TOKBUF')
     b.ld_de_label('TOKBUF')
     b.inc_de()
-    b.ld_bc_nn(255)
+    b.ld_bc_nn(qb * 2 - 1)        # clear query region (query_buckets * 2 bytes)
     b.ld_a_n(0)
     b.ld_hl_a()
     b.ldir()
@@ -1417,7 +1430,7 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
     b.add_hl_bc_16()
 
     b.ld_a_l()
-    b.and_n(127)
+    b.and_n(qb - 1)               # query bucket = hash & (query_buckets - 1)
 
     b.ld_hl_nn(0)
     b.ld_l_a()
@@ -1718,7 +1731,7 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
     b.label('TOKC3');   b.db(0)
     b.label('CTXPOS');  b.db(0)
     b.label('CTXN');    b.db(0)
-    b.label('CTXCHARS'); b.ds(8)
+    b.label('CTXCHARS'); b.ds(clen)
 
     # Input buffer and flags
     b.label('INPLEN');  b.db(0)

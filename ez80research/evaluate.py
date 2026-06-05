@@ -40,6 +40,8 @@ if REPO_ROOT not in sys.path:
 
 import sizes  # noqa: E402
 import faithgate  # noqa: E402
+import modelspec  # noqa: E402
+from loadmodel import load_spec_from_model  # noqa: E402
 from train import (  # noqa: E402
     NeochatModel, CHARSET, INPUT_SIZE, NUM_CHARS,
     create_training_examples_with_pos, filter_legacy_state,
@@ -103,8 +105,14 @@ def measure_intacc(model_path, device, n_samples=8000):
     random.shuffle(pairs)
     pairs = pairs[:n_samples]
 
-    qe = TrigramEncoder(num_buckets=128)
-    ce = ContextEncoder(num_buckets=128, context_len=8)
+    # Build the eval encoder from the model's OWN frozen spec (encoding is a DOF):
+    # query/context bucket counts and context length come from the spec, not a
+    # hardcoded 128/128/8. The teacher-forced example construction stays here
+    # (grader-controlled), so the next-char label can never leak into the input.
+    spec = load_spec_from_model(model_path)
+    qe = TrigramEncoder(num_buckets=spec['query_buckets'])
+    ce = ContextEncoder(num_buckets=spec['context_buckets'],
+                        context_len=spec['context_len'])
 
     examples = []
     for q, r in pairs:
@@ -114,7 +122,11 @@ def measure_intacc(model_path, device, n_samples=8000):
         examples = examples[:MAX_EVAL_EXAMPLES]
 
     cp = torch.load(model_path, weights_only=False, map_location='cpu')
-    model = NeochatModel()
+    # Construct the model with its own spec/dims so ANY architecture (depth, width,
+    # bit-width, encoding) loads and runs its integer path correctly.
+    model = NeochatModel(input_size=spec['input_size'],
+                         hidden_sizes=spec['hidden_sizes'],
+                         num_chars=NUM_CHARS, spec=spec)
     model.load_state_dict(filter_legacy_state(cp['model_state']))
     model.to(device)
     model.eval()
@@ -132,16 +144,23 @@ def measure_intacc(model_path, device, n_samples=8000):
     return int_acc
 
 
-def check_contract(meta, measured_intacc):
+def check_contract(meta, measured_intacc, spec):
     """Return list of contract VIOLATIONS (empty == OK). These pins stop the
-    agent from 'winning' by shrinking the problem or faking the metric."""
+    agent from 'winning' by shrinking the problem or faking the metric.
+
+    Encoding is now a degree of freedom, so input_size is no longer pinned to 256;
+    instead we require it to be CONSISTENT with the spec's encoder (query +
+    context buckets). The 43-char output and the exact charset stay fixed (the
+    task), and the teacher-forced example construction (in measure_intacc) keeps
+    the next-char label out of the input, so a custom encoder cannot leak it."""
     violations = []
     arch = meta['architecture']
 
     if arch.get('num_classes') != NUM_CHARS:
         violations.append(f'CONTRACT_NUMCLASSES({arch.get("num_classes")}!={NUM_CHARS})')
-    if arch.get('input_size') != INPUT_SIZE:
-        violations.append(f'CONTRACT_INPUTSIZE({arch.get("input_size")}!={INPUT_SIZE})')
+    expected_in = spec['query_buckets'] + spec['context_buckets']
+    if arch.get('input_size') != expected_in:
+        violations.append(f'CONTRACT_INPUTSIZE({arch.get("input_size")}!={expected_in})')
     if meta['charset'] != CHARSET:
         violations.append('CONTRACT_CHARSET')
 
@@ -243,7 +262,8 @@ def main():
               f"(checkpoint reported {meta['best_int_acc']:.4f})")
 
         # 2. CONTRACT
-        violations = check_contract(meta, intacc)
+        spec = load_spec_from_model(args.model)
+        violations = check_contract(meta, intacc, spec)
         if violations:
             print(f"[contract] VIOLATIONS: {violations}")
             _fail(intacc, empty_sizes, violations)
