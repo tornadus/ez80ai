@@ -36,7 +36,7 @@ EXPECTED_NUM_CLASSES = 43
 # a stage may read must exist here with a sensible default.
 DEFAULT_SPEC = {
     # --- topology ---
-    "hidden_sizes": [512, 512, 256],
+    "hidden_sizes": [448, 448, 256],
     "num_classes": EXPECTED_NUM_CLASSES,     # validated == len(CHARSET)
     "activation": "relu",                    # enum: relu (others need kernel+codegen)
 
@@ -57,8 +57,8 @@ DEFAULT_SPEC = {
     "n_bias_buckets": 2,                     # 2 == dual; >2 reserved for later
 
     # --- encoding (a real DOF; input_size is DERIVED from the two bucket counts) ---
-    "query_buckets": 128,                    # power of two
-    "context_buckets": 128,                  # power of two
+    "query_buckets": 256,                    # power of two
+    "context_buckets": 256,                  # power of two
     "context_len": 8,
     "query_ngram_orders": [3],               # trigram query today
     "context_ngram_orders": [1, 2, 3],
