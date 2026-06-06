@@ -36,7 +36,7 @@ EXPECTED_NUM_CLASSES = 43
 # a stage may read must exist here with a sensible default.
 DEFAULT_SPEC = {
     # --- topology ---
-    "hidden_sizes": [448, 448, 256],
+    "hidden_sizes": [440, 440, 256],
     "num_classes": EXPECTED_NUM_CLASSES,     # validated == len(CHARSET)
     "activation": "relu",                    # enum: relu (others need kernel+codegen)
 

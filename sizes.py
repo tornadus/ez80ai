@@ -34,7 +34,19 @@ build works today, so we gate on RAM.
 """
 
 # Binding constraint: program + weights + buffers, all resident in RAM at run.
-RAM_BUDGET_BYTES = 150 * 1024     # >=150 KB free RAM (README)
+#
+# CORRECTED 2026-06 against ON-DEVICE binary search. The Ti-84 Plus CE has ~154 KB
+# user RAM TOTAL, but the TI-OS needs a chunk left FREE to launch+run a program.
+# Measured on hardware (filler-AppVar binary search): NEOCHAT RAN with 5,553 B free
+# and FAILED with 5,027 B free -> the OS minimum free-to-run is ~5.0-5.5 KB. (The
+# previous release's 9.6 KB free was just comfortably above it; the current build's
+# 4,768 B was below it.) So the gate is set to leave a SAFE margin above that
+# threshold. Anchor: the current build is 146,820 B accounting @ 4,768 B free, so
+# this accounting metric maps to free RAM as  free ~= 151,588 - accounting. A budget
+# of 141 KB (144,384) => an at-budget model leaves ~7.2 KB free (~1.7 KB over the
+# ~5.5 KB cliff); our shipped model sits a bit under that (~8 KB free). Go higher
+# only if you've freed the calc of other vars; lower for more robustness.
+RAM_BUDGET_BYTES = 141 * 1024     # leaves >=~7 KB free (OS cliff measured at ~5.0-5.5 KB)
 
 # .8xv payload hard limit. The on-disk var entry length-prefixes the payload with
 # a uint16 TWICE (build_8xv: var_data = u16(len) + payload, then the entry stores
@@ -45,7 +57,12 @@ MAX_APPVAR_BYTES = 65533
 
 # Fixed RAM consumers besides the packed weights.
 RUNTIME_BUFFER_BYTES = 3 * 1024   # TOKBUF/BUF_A/BUF_B/OUTBUF working buffers
-PROGRAM_ESTIMATE_BYTES = 8 * 1024  # program code, for the arch-only pre-gate only
+# Program CODE estimate (logic only — the pregate adds the ds() working buffers
+# separately). The real emitted code (sans buffers) is ~2.0-2.5 KB; the old 8 KB
+# was a ~5 KB over-estimate that was harmless under the old 150 KB budget but
+# rejects feasible models under the corrected tight budget. 2500 keeps the pregate
+# only a few hundred bytes conservative vs the real build size.
+PROGRAM_ESTIMATE_BYTES = 2500      # program code (logic), arch-only pre-gate only
 
 
 class BudgetError(Exception):
