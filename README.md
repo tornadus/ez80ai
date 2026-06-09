@@ -46,7 +46,8 @@ A charming little chatbot that gives surprisingly coherent (but factually incorr
 ### What not to Expect
 A LLM on your calculator. Sorry, this isn't going to help you cheat. It's far too stupid for that.
 
-Lightning-fast inference. Expect seconds per character, not characters per second. It's not slow enough to bore you though!
+~~Lightning-fast inference. Expect seconds per character, not characters per second. It's not slow enough to bore you though!~~
+Update: It's pretty fast now!
 
 
 ### Contributing
@@ -56,11 +57,8 @@ CLAUDE.md actually has all the information you'd need to know as a contributor, 
 
 
 ### Roadmap
-There's only one "solid" feature that I'd like to ship eventually: TI-84 Evo support.
-
-So far, all we have are leaks, and God knows if we'll be able to run assembly on it. Brighter minds than I will likely be working on that capability as soon as they can get their hands on one. It's also possible that they ditch the Z80 lineage and move on to a more modern chip, which could throw a wrench into my plans.
-
-Other than that, I'll see if there's anything I can do to the model architecture to improve accuracy further within our very tiny footprint, though I already tried about a million things on that front. Like I said, contributions are welcome!
+Eventually a Ti-84 Evo port would be cool, but there's no way to execute native code as of now. It would also require a complete reimplementation of pretty much everything. It makes more sense as a separate project.
+Aside from that, I'd like to improve the model as much as I feasibly can.
 
 
 ### Licensing
