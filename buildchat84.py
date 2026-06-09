@@ -960,6 +960,13 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
         b.ld_hl_nn(in_size); b.ld_mem_label_hl('INCNT')
         b.pop_hl()
         b.ld_a_n(shift); b.ld_mem_label_a('LSHIFT')  # per-layer right-shift
+        if bits == 2:
+            # The fast 2-bit LAYER counts packed BYTES in an 8-bit counter
+            # (dec-from-0 wraps, so a stored 0 means 256 bytes = 1024 inputs).
+            assert in_size <= 1024, \
+                f"2-bit LAYER byte counter is 8-bit; input dim {in_size} > 1024"
+            b.ld_a_n((in_size // 4) & 0xFF)
+            b.ld_mem_label_a('INCNT8')
         b.jp(f'LAYER_B{bits}')                        # per-bit-width LAYER variant
 
     for plan in layer_plan:
@@ -997,17 +1004,172 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
     b.ret()
 
     # === LAYER: neural-net layer computation (one variant per weight bit-width) ===
-    # 24-bit native accumulator. The decode (LWT/LSAME) is bit-width-specific:
-    # 8//bits codes per packed byte, code = w + 2^(bits-1), zero-skip sentinel =
-    # zero_byte(bits). 2-bit uses the fast special-cased MULADD; wider widths use
-    # the general multiply MULADD_GEN. Internal labels are suffixed per variant.
+    # 24-bit native accumulator. 2-bit weights (the production width) get a fast
+    # register-resident loop (emit_layer_routine_b2); wider widths use the
+    # generic per-weight loop with MULADD_GEN. Internal labels are suffixed per
+    # variant. Both decode 8//bits codes per packed byte, code = w + 2^(bits-1),
+    # zero-skip sentinel = zero_byte(bits).
+
+    def emit_layer_routine_b2():
+        """Fast 2-bit LAYER. Same entry contract as the generic variant
+        (HL=weights, DE=bias, IX=input, IY=output, NEURCNT/LSHIFT set; the stub
+        additionally sets INCNT8 = input_dim/4 packed bytes), but the inner loop
+        keeps all per-weight state in registers instead of absolute memory:
+
+          HL = 24-bit accumulator         BC = packed-weight byte pointer
+          DE = current input value (upper byte held at 0 -- inputs are
+               non-negative 16-bit post-ReLU/encoding counts, the same
+               invariant the old loop's one-time LD DE,0 relied on)
+          IX = input element pointer      IY = output pointer (epilogue only)
+          A  = packed byte, consumed 2 bits per code via RRCA
+
+        The 4 codes of each byte are unrolled and processed LSB-first with
+        sequential 24-bit add/sub -- the exact weight order and arithmetic of
+        the old loop, so ACC matches it (and intkernel.forward_device)
+        bit-for-bit. The bias/shift/store epilogue is unchanged."""
+        zb = zero_byte(2)               # 0xAA = all-four-weights-zero sentinel
+
+        b.label('LAYER_B2')
+        b.ld_mem_label_hl('SAVW')       # weight pointer -> SAVW (safe LD (nn),HL)
+        b.ex_de_hl()                    # bias pointer (DE) -> SAVB via HL (caveat #2)
+        b.ld_mem_label_hl('SAVB')
+        b.ld_mem_label_ix('INBASE')     # input base; reloaded into IX per neuron
+
+        b.label('LNEUR_B2')
+        b.ld_ix_mem_label('INBASE')
+        b.ld_bc_mem_label('SAVW')       # ED-prefixed LOAD (safe; only stores are not)
+        b.ld_de_nn(0)                   # clear DE upper byte once for 8-bit addend loads
+        b.ld_hl_nn(0)                   # ACC = 0
+        b.ld_a_mem_label('INCNT8')
+        b.ld_mem_label_a('BCNT')
+
+        b.label('LBYTE_B2')
+        b.ld_a_bc()                     # A = packed byte (4 x 2-bit codes)
+        b.inc_bc()
+        b.cp_n(zb)
+        b.jp_z('LSKIP_B2')              # ZERO-SKIP: all 4 weights zero
+        for k in range(4):
+            # code -> weight: 0 -> -2, 1 -> -1, 2 -> 0, 3 -> +1. Two RRCAs per
+            # code on every path, so A always holds the next code in its low
+            # bits. RRCA touches only carry; LD never touches flags; OR A
+            # clears carry while preserving A.
+            b.rrca()
+            b.jr_c(f'LB2_ODD{k}')
+            b.rrca()
+            b.jr_c(f'LB2_NEXT{k}')      # code 2: weight 0, no work
+            # code 0: weight -2 = two subtractions. The carry MUST be cleared
+            # before BOTH SBCs -- a leaked borrow computes ACC - 2*DE - borrow
+            # and silently diverges from the sim (the old MULADD's MA_NEG had
+            # exactly this bug once). faithgate runs these literal bytes, but
+            # keep the invariant in mind when editing.
+            b.ld_e_ixd(2 * k)
+            b.ld_d_ixd(2 * k + 1)
+            b.or_a()
+            b.sbc_hl_de()
+            b.or_a()
+            b.sbc_hl_de()
+            b.jr(f'LB2_NEXT{k}')
+            b.label(f'LB2_ODD{k}')
+            b.rrca()
+            b.ld_e_ixd(2 * k)
+            b.ld_d_ixd(2 * k + 1)
+            b.jr_c(f'LB2_POS{k}')       # code 3: weight +1
+            b.or_a()                    # code 1: weight -1
+            b.sbc_hl_de()
+            b.jr(f'LB2_NEXT{k}')
+            b.label(f'LB2_POS{k}')
+            b.add_hl_de()
+            b.label(f'LB2_NEXT{k}')
+
+        b.label('LSKIP_B2')
+        b.lea_ix_d(8)                   # advance input past the byte's 4 elements
+        b.ld_a_mem_label('BCNT')
+        b.dec_a()
+        b.ld_mem_label_a('BCNT')
+        b.jp_nz('LBYTE_B2')
+
+        # Neuron done: hand ACC and the advanced weight pointer back to memory,
+        # then run the same bias + shift + store epilogue as the generic variant.
+        b.ld_mem_label_hl('ACC')
+        b.push_bc()
+        b.pop_hl()
+        b.ld_mem_label_hl('SAVW')       # persist weight pointer for next neuron
+
+        # Post inner loop: add bias THEN shift (output bias is pre-scaled, so this
+        # matches (matmul >> shift) + bias for the output layer too).
+        b.ld_hl_label('ACC')
+        b.ld_e_hl()
+        b.inc_hl()
+        b.ld_d_hl()
+        b.inc_hl()
+        b.ld_a_hl()
+
+        b.ld_hl_mem_label('SAVB')
+        b.ld_c_hl()                       # LD C, (HL)
+        b.inc_hl()
+        b.ld_b_hl()
+        b.inc_hl()
+        b.ld_mem_label_hl('SAVB')
+
+        b.ld_h_a()
+        b.ld_a_e()
+        b.add_a_c()                      # ADD A, C
+        b.ld_e_a()
+        b.ld_a_d()
+        b.adc_a_b()                      # ADC A, B
+        b.ld_d_a()
+        b.push_af()
+        b.ld_a_b()
+        b.add_a_a()
+        b.sbc_a_a()                      # SBC A, A
+        b.ld_b_a()
+        b.pop_af()
+        b.ld_a_h()
+        b.adc_a_b()                      # ADC A, B
+
+        # Arithmetic right shift by LSHIFT (per-layer divide; SRA;RR;RR = floor).
+        b.push_af()
+        b.ld_a_mem_label('LSHIFT')
+        b.ld_mem_label_a('LSHIFT_CNT')
+        b.pop_af()
+        b.label('LSH_LOOP_B2')
+        b.push_af()
+        b.ld_a_mem_label('LSHIFT_CNT')
+        b.or_a()
+        b.jr_z('LSH_DONE_B2')
+        b.dec_a()
+        b.ld_mem_label_a('LSHIFT_CNT')
+        b.pop_af()
+        b.sra_a()                         # SRA A
+        b.rr_d()                          # RR D
+        b.rr_e()                          # RR E
+        b.jr('LSH_LOOP_B2')
+        b.label('LSH_DONE_B2')
+        b.pop_af()
+
+        # Store result to output buffer
+        b.ld_iyd_e(0x00)                 # LD (IY+0), E
+        b.ld_iyd_d(0x01)                 # LD (IY+1), D
+        b.inc_iy()
+        b.inc_iy()
+
+        # Outer loop: decrement neuron counter
+        b.ld_hl_mem_label('NEURCNT')
+        b.dec_hl()
+        b.ld_mem_label_hl('NEURCNT')
+        b.ld_a_h()
+        b.or_l()
+        b.jp_nz('LNEUR_B2')
+        b.ret()
+
     def emit_layer_routine(bits):
+        assert bits != 2, "2-bit layers use the fast emit_layer_routine_b2"
         sfx = f'_B{bits}'
         cpb = 8 // bits                 # codes per packed byte
         mask = (1 << bits) - 1
         off = 1 << (bits - 1)           # zero-code offset
         zb = zero_byte(bits)            # all-zero-weights sentinel byte
-        muladd = 'MULADD' if bits == 2 else 'MULADD_GEN'
+        muladd = 'MULADD_GEN'
 
         b.label(f'LAYER_B{bits}')
         b.ld_mem_label_hl('SAVW')       # weight pointer -> SAVW (safe LD (nn),HL)
@@ -1161,47 +1323,10 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
         b.ret()
 
     for bits in sorted(set(wbits)):
-        emit_layer_routine(bits)
-
-    # === MULADD: Multiply-accumulate (24-bit native) ===
-    b.label('MULADD')
-    b.or_a()
-    b.jr_z('MA_RET')
-    b.jp_m('MA_NEG')
-    # weight == +1: ACC += DE
-    b.ld_hl_mem_label('ACC')
-    b.add_hl_de()
-    b.ld_mem_label_hl('ACC')
-    b.ret()
-
-    b.label('MA_NEG')
-    b.cp_n(0xFF)
-    b.jr_z('MA_N1')
-    # weight == -2: ACC -= 2*DE. Each SBC HL,DE subtracts DE *and the carry*, so
-    # the carry MUST be cleared before BOTH subtractions. Without the second
-    # `or a` the first SBC's borrow leaks into the second, computing
-    # ACC - 2*DE - borrow and silently diverging from the sim (train._forward_int
-    # does an exact -2*DE). This is an assembly-level bug, so the host
-    # test_faithfulness.py (which models the device CONTRACT, not the literal
-    # bytes) does NOT catch it -- verify on hardware via the --debug per-layer
-    # checksum build if you touch MA_NEG.
-    b.ld_hl_mem_label('ACC')
-    b.or_a()
-    b.sbc_hl_de()
-    b.or_a()
-    b.sbc_hl_de()
-    b.ld_mem_label_hl('ACC')
-    b.ret()
-
-    b.label('MA_N1')
-    # weight == -1: ACC -= DE
-    b.ld_hl_mem_label('ACC')
-    b.or_a()
-    b.sbc_hl_de()
-    b.ld_mem_label_hl('ACC')
-
-    b.label('MA_RET')
-    b.ret()
+        if bits == 2:
+            emit_layer_routine_b2()
+        else:
+            emit_layer_routine(bits)
 
     # === MULADD_GEN: general signed multiply-accumulate (for >2-bit weights) ===
     # A = signed weight, DE = input value, ACC += A*DE via |A| add/subtract steps.
@@ -1718,6 +1843,9 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
     b.label('SAVW');    b.d3(0)
     b.label('SAVB');    b.d3(0)
     b.label('CURIN');   b.d3(0)
+    b.label('INBASE');  b.d3(0)      # input-buffer base (3-byte; LD (nn),IX / LD IX,(nn))
+    b.label('INCNT8');  b.db(0)      # packed bytes per input row (in_size/4 mod 256)
+    b.label('BCNT');    b.db(0)      # working byte counter for the 2-bit inner loop
     b.label('PACKED');  b.db(0)
     b.label('WEIGHT');  b.db(0)
     b.label('LSHIFT');     b.db(0)   # per-layer right-shift, set by each stub
@@ -1849,7 +1977,7 @@ if __name__ == '__main__':
 
     # Show key addresses
     print("\nKey addresses:")
-    for name in ['START', 'GENERATE', 'FORWARD', 'LAYER', 'MULADD', 'ARGMAX',
+    for name in ['START', 'GENERATE', 'FORWARD', 'LAYER_B2', 'ARGMAX',
                  'TOKENIZE', 'UPDATE_CTX', 'ENCODE_CTX', 'CLEAR_CTX',
                  'CHARTBL', 'TOKBUF', 'OUTBUF', 'PING', 'PONG']:
         if name in b.labels:

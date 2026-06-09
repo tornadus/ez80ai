@@ -215,6 +215,11 @@ class eZ80Builder:
     def ld_sp_mem_label(self, label): self.emit(0xED, 0x7B); self.fixup_word(label)
     def ld_a_mem_label(self, label): self.emit(0x3A); self.fixup_word(label)
     def ld_mem_label_a(self, label): self.emit(0x32); self.fixup_word(label)
+    # IX absolute load/store (DD 2A / DD 22): same non-ED encodings as the HL
+    # forms (and the FD 2A/22 IY forms used for SAVED_IY), so they are safe on
+    # real hardware -- caveat #2 only concerns ED-prefixed .LIS stores.
+    def ld_ix_mem_label(self, label): self.emit(0xDD, 0x2A); self.fixup_word(label)
+    def ld_mem_label_ix(self, label): self.emit(0xDD, 0x22); self.fixup_word(label)
 
     # === 8-bit register-register loads ===
 
@@ -257,6 +262,8 @@ class eZ80Builder:
 
     def ld_l_ixd(self, d): self.emit(0xDD, 0x6E, d & 0xFF)
     def ld_h_ixd(self, d): self.emit(0xDD, 0x66, d & 0xFF)
+    def ld_e_ixd(self, d): self.emit(0xDD, 0x5E, d & 0xFF)  # LD E,(IX+d)
+    def ld_d_ixd(self, d): self.emit(0xDD, 0x56, d & 0xFF)  # LD D,(IX+d)
     def ld_ixd_l(self, d): self.emit(0xDD, 0x75, d & 0xFF)
     def ld_ixd_h(self, d): self.emit(0xDD, 0x74, d & 0xFF)
     def ld_iyd_l(self, d): self.emit(0xFD, 0x75, d & 0xFF)
@@ -340,6 +347,11 @@ class eZ80Builder:
     def inc_l(self): self.emit(0x2C)
     def inc_ix(self): self.emit(0xDD, 0x23)
     def inc_iy(self): self.emit(0xFD, 0x23)
+
+    def lea_ix_d(self, d):
+        """LEA IX, IX+d (ED 32 d) -- core eZ80 instruction (emitted pervasively
+        by the CE C toolchain), signed 8-bit displacement."""
+        self.emit(0xED, 0x32, d & 0xFF)
 
     # === Shifts and rotates ===
 

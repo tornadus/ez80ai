@@ -400,6 +400,8 @@ class CPU:
             t = a.r24(a.sp); a.w24(a.sp, cur); setidx(t); return
         if op == 0x6E: d = _s8(a.fetch8()); a.l = a.r8((cur + d) & MASK24); return  # LD L,(idx+d)
         if op == 0x66: d = _s8(a.fetch8()); a.h = a.r8((cur + d) & MASK24); return  # LD H,(idx+d)
+        if op == 0x5E: d = _s8(a.fetch8()); a.e = a.r8((cur + d) & MASK24); return  # LD E,(idx+d)
+        if op == 0x56: d = _s8(a.fetch8()); a.d = a.r8((cur + d) & MASK24); return  # LD D,(idx+d)
         if op == 0x75: d = _s8(a.fetch8()); a.w8((cur + d) & MASK24, a.l); return   # LD (idx+d),L
         if op == 0x74: d = _s8(a.fetch8()); a.w8((cur + d) & MASK24, a.h); return   # LD (idx+d),H
         if op == 0x72: d = _s8(a.fetch8()); a.w8((cur + d) & MASK24, a.d); return   # LD (idx+d),D
@@ -412,6 +414,8 @@ class CPU:
         a = self
         if op == 0x52: a.hl = a._sbc24(a.hl, a.de); return  # SBC HL,DE
         if op == 0x42: a.hl = a._sbc24(a.hl, a.bc); return  # SBC HL,BC
+        if op == 0x32:                                       # LEA IX,IX+d
+            d = _s8(a.fetch8()); a.ix = (a.ix + d) & MASK24; return
         if op == 0x53: a.w24(a.fetch24(), a.de); return     # LD (nn),DE
         if op == 0x43: a.w24(a.fetch24(), a.bc); return     # LD (nn),BC
         if op == 0x4B: a.bc = a.r24(a.fetch24()); return    # LD BC,(nn)
