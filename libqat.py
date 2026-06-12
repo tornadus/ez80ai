@@ -87,8 +87,16 @@ def quantization_friendly_loss(w: torch.Tensor) -> torch.Tensor:
     return distance.mean()
 
 
+@torch.compiler.disable
+def _weight_scale(w: torch.Tensor) -> torch.Tensor:
+    """Per-tensor weight scale: 0.85-quantile of |w|. Kept OUT of any compiled
+    graph: XPU Inductor crashes lowering torch.quantile at large tensor sizes,
+    and quantile is a full sort the compiler can't fuse anyway."""
+    return torch.quantile(w.abs().flatten(), 0.85).clamp(min=1e-6)
+
+
 def quantize_weights_2bit_with_loss(w: torch.Tensor, hard: bool = True,
-                                    temperature: float = 1.0):
+                                    temperature=1.0, scale=None):
     """Fused quantize + quant-friendly loss, returning (w_quant, qloss).
 
     torch.quantile is a full sort and dominates QAT step cost, but the training
@@ -99,21 +107,26 @@ def quantize_weights_2bit_with_loss(w: torch.Tensor, hard: bool = True,
     torch.quantile, as before), while the forward branch's gradients are blocked
     by the STE either way. The loss is always full-strength regardless of
     temperature, matching quantization_friendly_loss.
+
+    The blend is computed branch-free in `temperature` (bit-exact at the 0/1
+    endpoints: 0*w + 1*wq == wq, 1*w + 0*wq == w, and the STE is an identity in
+    both value and gradient when its two args coincide). That lets `temperature`
+    be a 0-dim TENSOR under torch.compile — a Python float would bake into the
+    graph and force a recompile every time the QT ramp moves.
+
+    `scale`: pass a precomputed (detached) scale to skip the quantile — the
+    scale_refresh_every>1 stale-scale mode. None = exact per-call quantile.
     """
-    scale = torch.quantile(w.abs().flatten(), 0.85).clamp(min=1e-6)
+    if scale is None:
+        scale = _weight_scale(w)
     w_scaled = w / scale
     w_rounded = _grid_round(w_scaled)
     qloss = (w_scaled - w_rounded).abs().mean()
 
-    if temperature <= 0:
-        return w, qloss
-
-    w_quant = w_rounded * scale
-    if temperature < 1.0:
-        w_quant = (1 - temperature) * w + temperature * w_quant
+    w_blend = (1 - temperature) * w + temperature * (w_rounded * scale)
     if hard:
-        return StraightThroughEstimator.apply(w, w_quant), qloss
-    return w_quant, qloss
+        return StraightThroughEstimator.apply(w, w_blend), qloss
+    return w_blend, qloss
 
 
 class OverflowAwareLinear(nn.Module):
@@ -134,10 +147,14 @@ class OverflowAwareLinear(nn.Module):
 
         self.weight = nn.Parameter(torch.randn(out_features, in_features) * np.sqrt(2.0 / (in_features + out_features)))
         self.bias = nn.Parameter(torch.zeros(out_features))
+        # Stale-scale mode (spec scale_refresh_every > 1): a detached scale set
+        # by NeochatModel.refresh_quant_scales(). None = exact per-call quantile.
+        self._cached_scale = None
 
-    def forward(self, x: torch.Tensor, quant_temp: float = 1.0) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, quant_temp=1.0) -> torch.Tensor:
         w_quant, self._qloss = quantize_weights_2bit_with_loss(
-            self.weight, hard=True, temperature=quant_temp)
+            self.weight, hard=True, temperature=quant_temp,
+            scale=self._cached_scale)
         return F.linear(x, w_quant, self.bias)
 
     def get_quantization_loss(self) -> torch.Tensor:

@@ -138,6 +138,21 @@ class NeochatModel(nn.Module):
 
         self.relu = nn.ReLU()
 
+        # Stale-scale mode (spec scale_refresh_every > 1) for the output layer;
+        # hidden layers carry their own _cached_scale (see OverflowAwareLinear).
+        self._out_cached_scale = None
+
+    def refresh_quant_scales(self):
+        """Stale-scale mode: recompute and cache DETACHED weight scales for all
+        layers. Called by the train loop every scale_refresh_every steps; while
+        cached, the quant loss loses its gradient-through-quantile term (that
+        trade-off is what the harness A/B validates). Never called when
+        scale_refresh_every == 1, leaving the exact per-step path."""
+        with torch.no_grad():
+            for layer in self.layers:
+                layer._cached_scale = libqat._weight_scale(layer.weight)
+            self._out_cached_scale = libqat._weight_scale(self.output_layer.weight)
+
     def forward(self, x, positions=None, use_int=False, quant_temp=1.0):
         if use_int:
             return self._forward_int(x, positions)
@@ -150,7 +165,8 @@ class NeochatModel(nn.Module):
         # Output layer (without its own bias); fused call caches the quant loss
         # so compute_quantization_loss() doesn't redo the quantile sort.
         w_quant, self._out_qloss = quantize_weights_2bit_with_loss(
-            self.output_layer.weight, hard=True, temperature=quant_temp)
+            self.output_layer.weight, hard=True, temperature=quant_temp,
+            scale=self._out_cached_scale)
         logits = x @ w_quant.T  # No bias from the linear layer
 
         # Apply dual bias
@@ -178,7 +194,8 @@ class NeochatModel(nn.Module):
             x = self.relu(x)
 
         w_quant, self._out_qloss = quantize_weights_2bit_with_loss(
-            self.output_layer.weight, hard=True, temperature=quant_temp)
+            self.output_layer.weight, hard=True, temperature=quant_temp,
+            scale=self._out_cached_scale)
         logits = x @ w_quant.T
 
         if use_start_bias:
@@ -188,9 +205,12 @@ class NeochatModel(nn.Module):
 
         return logits
 
+    @torch.compiler.disable
     def _forward_int(self, x, positions=None):
         """Simulate the eZ80 integer path. The torch MIRROR of intkernel.forward_int
-        (held bit-exact by test_intkernel.py); all constants come from self.spec."""
+        (held bit-exact by test_intkernel.py); all constants come from self.spec.
+        Excluded from torch.compile: this is the bit-exact reference (and it's
+        eval-only, every 10 epochs) — it must never be transformed."""
         spec = self.spec
         q = spec['weight_quantile']
         bits = spec['weight_bits']
@@ -448,6 +468,26 @@ def train(epochs=300, lr=0.002, save_best=False, batch_size=8192, quant_target_e
         print(f"Parameters: {total_params:,}")
 
     model = model.to(device)
+
+    # --- training-loop speed knobs (float path only; see modelspec) ---
+    use_compile = SPEC.get('train_compile', False)
+    use_bf16 = SPEC.get('train_bf16', False)
+    scale_k = SPEC.get('scale_refresh_every', 1)
+    if use_compile:
+        # In-place compile keeps state_dict keys un-prefixed (checkpoint compat).
+        # The quantile (libqat._weight_scale) and _forward_int are excluded via
+        # @torch.compiler.disable.
+        model.compile()
+        print("torch.compile: enabled (quantile + integer path stay eager)")
+    if use_bf16:
+        print("bf16 autocast: enabled (matmuls only; eval/export stay fp32)")
+    if scale_k > 1:
+        print(f"stale quant scales: refresh every {scale_k} steps")
+    from contextlib import nullcontext
+    def amp_ctx():
+        return (torch.autocast(device_type=device.type, dtype=torch.bfloat16)
+                if use_bf16 else nullcontext())
+
     # weight_decay is LOAD-BEARING FOR QUANTIZATION (do not remove): although the
     # 0.85-quantile quantizer is scale-relative, decay is not a uniform rescale --
     # it pulls larger weights down proportionally, keeping the weight distribution
@@ -498,6 +538,11 @@ def train(epochs=300, lr=0.002, save_best=False, batch_size=8192, quant_target_e
             _qt0 = SPEC['qt_start']
             quant_temp = _qt0 + (1 - _qt0) * min(
                 1.0, global_epoch / (quant_target_epoch * SPEC['qt_ramp_factor']))
+            # Under torch.compile the temperature must be a TENSOR: a Python
+            # float bakes into the graph and the QT ramp would force a recompile
+            # every epoch (blowing dynamo's recompile limit -> silent eager).
+            qt_arg = (torch.full((), quant_temp, device=device)
+                      if use_compile else quant_temp)
 
             # Shuffle indices each epoch (on GPU to avoid CPU-GPU sync)
             perm = torch.randperm(n_examples, device=device)
@@ -518,9 +563,13 @@ def train(epochs=300, lr=0.002, save_best=False, batch_size=8192, quant_target_e
 
                 optimizer.zero_grad()
 
-                outputs = model(X_batch, positions=pos_batch, quant_temp=quant_temp)
-                ce_loss = criterion(outputs, y_batch)
-                quant_loss = model.compute_quantization_loss() * SPEC['quant_loss_weight']
+                if scale_k > 1 and global_step % scale_k == 0:
+                    model.refresh_quant_scales()
+
+                with amp_ctx():
+                    outputs = model(X_batch, positions=pos_batch, quant_temp=qt_arg)
+                    ce_loss = criterion(outputs, y_batch)
+                    quant_loss = model.compute_quantization_loss() * SPEC['quant_loss_weight']
 
                 loss = ce_loss + quant_loss
                 loss.backward()

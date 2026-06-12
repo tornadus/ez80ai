@@ -81,6 +81,15 @@ DEFAULT_SPEC = {
     "lr_schedule": "cosine",
     "eta_min_frac": 0.02,
 
+    # --- training-loop speed knobs (float-path ONLY: never touch _forward_int /
+    # intkernel / the exported artifact, whose quantization always recomputes the
+    # exact full quantile). Defaults reproduce the legacy loop exactly. ---
+    "train_compile": True,        # torch.compile the model body (quantile stays eager)
+    "train_bf16": True,           # bf16 autocast on matmuls (XMX units); eval stays fp32
+    "scale_refresh_every": 1,      # recompute weight-scale quantile every k steps
+                                   # (1 = every step, exact incl. quantile gradient;
+                                   #  k>1 = detached stale scale, drops that gradient)
+
     # --- compute budget (P6); 'wall_s' keeps today's wall-clock semantics) ---
     "compute_budget": {"mode": "wall_s", "limit": 600},
 }
