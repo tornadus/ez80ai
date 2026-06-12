@@ -1265,41 +1265,28 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
         b.inc_ix()
         b.cp_n(zb)
         b.jp_z('CM_ZB')                 # ZERO-SKIP: all 4 weights zero
-        for k in range(4):
-            # code -> weight: 0 -> -2, 1 -> -1, 2 -> 0, 3 -> +1 (LSB first),
-            # accumulator slot k at IY + 3k. Two RRCAs per code on every path.
-            b.rrca()
-            b.jr_c(f'CMO{k}')
-            b.rrca()
-            b.jr_c(f'CMN{k}')           # code 2: weight 0, no work
-            b.ld_hl_iyd(3 * k)          # code 0: weight -2 = two subtractions
-            b.or_a()
-            b.sbc_hl_de()
-            b.or_a()
-            b.sbc_hl_de()
-            b.ld_iyd_hl(3 * k)
-            b.jr(f'CMN{k}')
-            b.label(f'CMO{k}')
-            b.rrca()
-            b.ld_hl_iyd(3 * k)
-            b.jr_c(f'CMP{k}')           # code 3: weight +1
-            b.or_a()                    # code 1: weight -1
-            b.sbc_hl_de()
-            b.ld_iyd_hl(3 * k)
-            b.jr(f'CMN{k}')
-            b.label(f'CMP{k}')
-            b.add_hl_de()
-            b.ld_iyd_hl(3 * k)
-            b.label(f'CMN{k}')
-        b.label('CM_ZB')
+        # Jump-table dispatch: every packed byte value has a builder-generated
+        # straight-line handler (no per-code RRCA/branch decode). Entry =
+        # CMJT + 4*A (3-byte handler address + 1 pad byte); LD HL,(HL) +
+        # JP (HL) does the indirection. DE (the input value) is preserved
+        # around the table-base load.
+        b.ld_hl_nn(0)
+        b.ld_l_a()
+        b.add_hl_hl()
+        b.add_hl_hl()                   # HL = 4*A
+        b.push_de()
+        b.ld_de_label('CMJT')
+        b.add_hl_de()
+        b.pop_de()
+        b.ld_hl_hl_ind()                # HL = handler address
+        b.jp_hl()
+        b.label('CM_ZB')                # handlers JP back here
         b.lea_iy_d(12)                  # 4 neurons x 3 bytes
-        b.djnz('CM_T')                  # column loop (trampoline: out of JR range)
+        b.djnz('CM_BYTE')               # column loop
         b.dec_c()                       # page boundary; B==0 dec-wraps to 256
         b.jp_nz('CM_BYTE')
         b.ld_mem_label_ix('SAVW')       # column done: persist weight pointer
         b.jr('CM_NEXT')
-        b.label('CM_T')
-        b.jp('CM_BYTE')
 
         b.label('CM_SKIP')              # zero input: weight ptr += ROWBYTES
         b.ld_hl_mem_label('SAVW')
@@ -1362,6 +1349,39 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
         b.pop_hl()
         b.jp_nz('EPI_LOOP')
         b.ret()
+
+        # --- CMJT + handlers: straight-line accumulate code per byte value ---
+        # CMJT[v] = address of CMH{v}; each handler applies the byte's four
+        # 2-bit codes (LSB first; code -> weight 0->-2, 1->-1, 2->0, 3->+1)
+        # to accumulator slots IY+0/3/6/9 with the SAME add/sub sequence as
+        # the unrolled decoder it replaces (carry cleared before every SBC),
+        # then jumps to the shared column-loop tail. Identical accumulator
+        # arithmetic in the identical order => bit-exact; faithgate proves it
+        # on the literal bytes.
+        b.label('CMJT')
+        for v in range(256):
+            b.fixup_word(f'CMH{v}')     # 3-byte handler address
+            b.db(0)                     # pad to a 4-byte stride (HL = 4*A)
+        for v in range(256):
+            b.label(f'CMH{v}')
+            if v != zb:                 # 0xAA is short-circuited before dispatch
+                for k in range(4):
+                    code = (v >> (2 * k)) & 3
+                    if code == 2:       # weight 0
+                        continue
+                    b.ld_hl_iyd(3 * k)
+                    if code == 3:       # +1
+                        b.add_hl_de()
+                    elif code == 1:     # -1
+                        b.or_a()
+                        b.sbc_hl_de()
+                    else:               # 0 -> -2
+                        b.or_a()
+                        b.sbc_hl_de()
+                        b.or_a()
+                        b.sbc_hl_de()
+                    b.ld_iyd_hl(3 * k)
+            b.jp('CM_ZB')
 
     def emit_layer_routine(bits):
         assert bits != 2, "2-bit layers use the column-major LAYER_CM engine"

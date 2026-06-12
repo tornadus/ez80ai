@@ -311,6 +311,7 @@ class CPU:
             return
         if op == 0xCD: a.call(a.fetch24()); return       # CALL
         if op == 0xC3: a.pc = a.fetch24(); return        # JP
+        if op == 0xE9: a.pc = a.hl & MASK24; return      # JP (HL)
         if op == 0xC2:
             t = a.fetch24();  a.pc = t if not a.fz else a.pc; return
         if op == 0xCA:
@@ -433,6 +434,7 @@ class CPU:
             d = _s8(a.fetch8()); a.ix = (a.ix + d) & MASK24; return
         if op == 0x33:                                       # LEA IY,IY+d
             d = _s8(a.fetch8()); a.iy = (a.iy + d) & MASK24; return
+        if op == 0x27: a.hl = a.r24(a.hl); return           # LD HL,(HL)
         if op == 0x53: a.w24(a.fetch24(), a.de); return     # LD (nn),DE
         if op == 0x43: a.w24(a.fetch24(), a.bc); return     # LD (nn),BC
         if op == 0x4B: a.bc = a.r24(a.fetch24()); return    # LD BC,(nn)

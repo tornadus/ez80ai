@@ -164,6 +164,11 @@ class eZ80Builder:
         self.emit(0xDA)
         self.fixup_word(label)
 
+    def jp_hl(self):
+        """JP (HL) (E9) -- computed jump to the 24-bit address in HL
+        (CEmu cpu.c:1239-1253, 'JP (rr)')."""
+        self.emit(0xE9)
+
     def jr(self, label: str):
         self.emit(0x18)
         self.fixup_rel(label)
@@ -216,6 +221,11 @@ class eZ80Builder:
     def ld_hl_n(self, val): self.emit(0x36, val & 0xFF)  # LD (HL),n
 
     # === 24-bit memory load/store ===
+
+    def ld_hl_hl_ind(self):
+        """LD HL,(HL) (ED 27) -- 24-bit pointer-table indirection in one
+        instruction (CEmu cpu.c:1421-1428, ED page x=0,z=7,q=0,p=2)."""
+        self.emit(0xED, 0x27)
 
     def ld_hl_mem_label(self, label): self.emit(0x2A); self.fixup_word(label)
     def ld_mem_label_hl(self, label): self.emit(0x22); self.fixup_word(label)
