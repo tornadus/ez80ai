@@ -26,7 +26,7 @@ import torch.nn as nn
 sys.stdout.reconfigure(line_buffering=True)
 
 import libqat
-from libqat import OverflowAwareLinear, quantize_weights_2bit
+from libqat import OverflowAwareLinear, quantize_weights_2bit_with_loss
 from encoding import (
     TrigramEncoder, ContextEncoder,
     create_training_examples, parse_pair, load_chunk,
@@ -147,9 +147,10 @@ class NeochatModel(nn.Module):
             x = layer(x, quant_temp=quant_temp)
             x = self.relu(x)
 
-        # Output layer (without its own bias)
-        w = self.output_layer.weight
-        w_quant = quantize_weights_2bit(w, hard=True, temperature=quant_temp)
+        # Output layer (without its own bias); fused call caches the quant loss
+        # so compute_quantization_loss() doesn't redo the quantile sort.
+        w_quant, self._out_qloss = quantize_weights_2bit_with_loss(
+            self.output_layer.weight, hard=True, temperature=quant_temp)
         logits = x @ w_quant.T  # No bias from the linear layer
 
         # Apply dual bias
@@ -176,8 +177,8 @@ class NeochatModel(nn.Module):
             x = layer(x, quant_temp=quant_temp)
             x = self.relu(x)
 
-        w = self.output_layer.weight
-        w_quant = quantize_weights_2bit(w, hard=True, temperature=quant_temp)
+        w_quant, self._out_qloss = quantize_weights_2bit_with_loss(
+            self.output_layer.weight, hard=True, temperature=quant_temp)
         logits = x @ w_quant.T
 
         if use_start_bias:
@@ -248,7 +249,11 @@ class NeochatModel(nn.Module):
 
     def compute_quantization_loss(self):
         loss = sum(layer.get_quantization_loss() for layer in self.layers)
-        loss += self.output_layer.get_quantization_loss()
+        out_qloss = getattr(self, '_out_qloss', None)
+        if out_qloss is not None:
+            loss = loss + out_qloss
+        else:
+            loss = loss + self.output_layer.get_quantization_loss()
         return loss
 
     def get_quantized_params(self):
@@ -496,8 +501,11 @@ def train(epochs=300, lr=0.002, save_best=False, batch_size=8192, quant_target_e
 
             # Shuffle indices each epoch (on GPU to avoid CPU-GPU sync)
             perm = torch.randperm(n_examples, device=device)
-            epoch_loss = 0.0
-            epoch_correct = 0
+            # Display-only metrics accumulate ON DEVICE; .item() forces a GPU
+            # sync, so paying it per batch (2x) cost ~8% of step time. One sync
+            # per epoch at the print site instead.
+            epoch_loss = torch.zeros((), device=device)
+            epoch_correct = torch.zeros((), device=device, dtype=torch.long)
 
             for batch_idx in range(n_batches):
                 start = batch_idx * batch_size
@@ -519,15 +527,15 @@ def train(epochs=300, lr=0.002, save_best=False, batch_size=8192, quant_target_e
                 optimizer.step()
                 global_step += 1
 
-                epoch_loss += ce_loss.item() * (end - start)
-                epoch_correct += (outputs.argmax(dim=1) == y_batch).sum().item()
+                epoch_loss += ce_loss.detach() * (end - start)
+                epoch_correct += (outputs.argmax(dim=1) == y_batch).sum()
                 if max_steps and global_step >= max_steps:
                     budget_hit = True
                     break
 
             current_epoch = total_epochs + epoch + 1
-            avg_loss = epoch_loss / n_examples
-            avg_acc = epoch_correct / n_examples
+            avg_loss = (epoch_loss / n_examples).item()   # the one sync per epoch
+            avg_acc = epoch_correct.item() / n_examples
             elapsed = time.time() - t_epoch
 
             # Evaluate IntAcc every 10 epochs (expensive), print CE every epoch

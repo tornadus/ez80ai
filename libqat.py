@@ -87,6 +87,35 @@ def quantization_friendly_loss(w: torch.Tensor) -> torch.Tensor:
     return distance.mean()
 
 
+def quantize_weights_2bit_with_loss(w: torch.Tensor, hard: bool = True,
+                                    temperature: float = 1.0):
+    """Fused quantize + quant-friendly loss, returning (w_quant, qloss).
+
+    torch.quantile is a full sort and dominates QAT step cost, but the training
+    loop needs the SAME scale twice per layer per step (forward quantize + the
+    quant loss). Computing scale/w_scaled/w_rounded once here is bit-exact
+    equivalent to quantize_weights_2bit() + quantization_friendly_loss(): the
+    scale stays in the autograd graph for the loss term (gradient flows through
+    torch.quantile, as before), while the forward branch's gradients are blocked
+    by the STE either way. The loss is always full-strength regardless of
+    temperature, matching quantization_friendly_loss.
+    """
+    scale = torch.quantile(w.abs().flatten(), 0.85).clamp(min=1e-6)
+    w_scaled = w / scale
+    w_rounded = _grid_round(w_scaled)
+    qloss = (w_scaled - w_rounded).abs().mean()
+
+    if temperature <= 0:
+        return w, qloss
+
+    w_quant = w_rounded * scale
+    if temperature < 1.0:
+        w_quant = (1 - temperature) * w + temperature * w_quant
+    if hard:
+        return StraightThroughEstimator.apply(w, w_quant), qloss
+    return w_quant, qloss
+
+
 class OverflowAwareLinear(nn.Module):
     """Linear layer with 2-bit weight quantization (STE).
 
@@ -107,8 +136,15 @@ class OverflowAwareLinear(nn.Module):
         self.bias = nn.Parameter(torch.zeros(out_features))
 
     def forward(self, x: torch.Tensor, quant_temp: float = 1.0) -> torch.Tensor:
-        w_quant = quantize_weights_2bit(self.weight, hard=True, temperature=quant_temp)
+        w_quant, self._qloss = quantize_weights_2bit_with_loss(
+            self.weight, hard=True, temperature=quant_temp)
         return F.linear(x, w_quant, self.bias)
 
     def get_quantization_loss(self) -> torch.Tensor:
+        # Reuse the loss computed by the most recent forward() (same weights,
+        # same step) instead of paying a second torch.quantile sort. Fallback
+        # for callers that query the loss without running forward first.
+        qloss = getattr(self, '_qloss', None)
+        if qloss is not None:
+            return qloss
         return quantization_friendly_loss(self.weight)
