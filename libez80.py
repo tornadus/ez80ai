@@ -8,33 +8,71 @@ Self-contained builder for generating Ti-84 Plus CE machine code with:
 - IY save/restore for TI-OS compatibility
 - Label/fixup system for forward references
 
-IMPORTANT eZ80 ADL mode caveats (audited against CEmu — see CAVEAT_AUDIT.md):
+IMPORTANT eZ80 ADL mode caveats. Audited 2026-06 against the CEmu CPU core
+(~/Documents/CEmu/src/core/{cpu.c,cpu.h,registers.h}; line refs are to that
+checkout). Two of the five original caveats were misdiagnosed; the corrected
+semantics below are the reference. ez80interp.py was aligned with CEmu in the
+same audit (suffixed pair writes zero bits 16-23; BIT 7,r sets S; suffixed
+memory/stack opcodes raise UnsupportedOpcode instead of mis-executing).
+
+How CEmu models suffixes (the mechanism behind caveats 1-3): a suffix byte
+sets two mode bits for the NEXT instruction (cpu.c:1155-1168): IL = opcode
+bit 1 controls immediate/address FETCH width; L = opcode bit 0 controls
+everything else — register-pair width/masking (cpu_read_rp/cpu_write_rp,
+cpu.c:311-331), data access width (cpu.c:125-139), WHICH STACK is used (SPS
+when L=0, cpu.c:141-164), and data address translation: every data access
+goes through cpu_address_mode(addr, L) (cpu.c:116-123), which with L=0
+rewrites the address to {MBASE, addr & 0xFFFF} (cpu.c:71-76).
+
   1. Suffix prefix bytes: 0x40=.SIS, 0x49=.SIL, 0x52=.LIS, 0x5B=.LIL
-     Many online sources have 0x49 and 0x52 SWAPPED. Verified via CEmu source
-     (cpu.c suffix decode: L = opcode bit 0, IL = opcode bit 1).
+     Many online sources have 0x49 and 0x52 SWAPPED. CONFIRMED via the CEmu
+     decode above (L = bit 0, IL = bit 1 of the suffix opcode).
   2. Suffixed (.SIS/.LIS) instructions that touch MEMORY or the STACK are
      unusable in an ADL program: the CPU executes them in Z80 mode, so data
-     accesses go to {MBASE, addr16} (NOT the 24-bit label address — on TI-OS
-     that is 0xD0xxxx, i.e. wrong reads and OS-RAM-corrupting writes) and
-     pushes/pops use the Z80 SPS stack. The historical "ED 43/ED 53 stores
-     corrupt adjacent memory" caveat was this, misdiagnosed; non-ED suffixed
-     memory forms and suffixed LOADS are equally broken. These emitters have
-     been REMOVED; ez80interp rejects the opcodes. Register-only suffixed ops
-     (ADD/SBC HL,rr / INC/DEC rr / EX DE,HL / immediate loads) are fully safe.
-  3. Flags from .LIS SBC are CORRECT for the 16-bit result per CEmu (S = bit
-     15, PV = 16-bit overflow). The old "sign flag may reflect bit 23" claim
-     is wrong; the real pitfall is that an S-only signed compare is overflow-
-     blind (needs S xor PV, i.e. JP PE/PO). The 8-bit XOR-sign-bits compare
+     accesses go to {MBASE, addr16} — NOT the 24-bit label address. On TI-OS
+     MBASE=0xD0 while userMem programs live at 0xD1A881+, so a suffixed
+     absolute access aimed at a program label hits 0xD0xxxx instead: garbage
+     reads and OS-RAM-corrupting writes ~64KB away. Pushes/pops additionally
+     use the Z80 SPS stack. The historical caveat here ("ED 43/ED 53 stores
+     corrupt adjacent memory; non-ED stores and loads are safe") was this,
+     misdiagnosed: there is no 3-byte over-write (a short store writes exactly
+     2 bytes, cpu.c:133-139) and the ED-vs-non-ED / store-vs-load distinctions
+     were spurious — ALL suffixed memory forms are equally broken ("loads are
+     safe" was luck, never stressed). These emitters have been REMOVED;
+     ez80interp rejects the opcodes loudly. Register-only suffixed ops
+     (ADD/SBC HL,rr / INC/DEC rr / EX DE,HL / immediate loads) touch no
+     memory and are fully safe.
+  3. Flags from .LIS SBC are CORRECT for the 16-bit result per CEmu: operands,
+     result and flags are computed at mode width — S = bit 15 of the result
+     (registers.h:202), Z on the masked 16-bit result, C = 16-bit borrow
+     (registers.h:199), PV = true 16-bit signed overflow (registers.h:212).
+     The old "S may reflect bit 23" claim is WRONG; the empirical failures it
+     explained came from S-only signed compares being overflow-blind on any
+     Z80-family CPU (e.g. 0x7FFF - 0x8000 overflows and flips S). A correct
+     signed compare needs S xor PV (JP PE/PO). The 8-bit XOR-sign-bits compare
      used by ARGMAX is a correct overflow-safe alternative and stays.
   4. 8-bit register loads (LD H,n / LD C,A / etc.) do NOT clear the upper byte
-     of the 24-bit register pair. Always use LD rr,0 (24-bit) before setting
-     individual registers if the pair will be used for pointer arithmetic.
-     (Per CEmu, suffixed 16-bit PAIR writes — .SIS LD HL,nn etc. — DO zero
-     bits 16-23; Zilog documents the upper byte as undefined, so do not RELY
-     on either behavior.)
-  5. TI-OS uses IY as flags base pointer (0xD00080). Save IY before computation
-     and restore before any TI-OS syscall (_PutC, _NewLine, etc.). This is an
-     OS ABI contract, not a CPU caveat.
+     of the 24-bit register pair — registers are byte-unions and 8-bit writes
+     touch only their byte (registers.h:114-129, cpu.c:260-272). Always use
+     LD rr,0 (24-bit) before assembling a pointer from 8-bit pieces. Nuance:
+     suffixed 16-bit PAIR writes (.SIS LD HL,nn / .LIS ADD HL,rr / INC rr...)
+     DO zero bits 16-23 in CEmu (cpu_write_rp masks then assigns the full
+     field, cpu.c:322-331) — the opposite of what this project once claimed —
+     with two hardware-verified exceptions that PRESERVE the upper byte: BC
+     decrements inside block instructions (cpu.c:410-419) and the destination
+     of EX (SP),rr (cpu.c:218-228). Zilog documents the upper byte as
+     undefined in Z80 mode, so the codegen relies on NEITHER behavior.
+  5. TI-OS uses IY as flags base pointer (0xD00080); save IY before
+     computation and restore before any TI-OS syscall (_PutC, _NewLine, ...).
+     This is an OS ABI contract, not a CPU caveat (cpu.c treats IY as an
+     ordinary index register). Inference code may use IY freely between
+     syscalls (the fast layer loops do).
+
+Instructions verified safe in the audit and now load-bearing in the hot
+loops: LD rr,(IX/IY+d) / LD (IX/IY+d),rr (cpu.c:1142-1148), LEA IY,IY+d
+(ED 33), LD A,(IX+d), DJNZ, LD HL,(HL) (ED 27) + JP (HL) for jump-table
+dispatch. MLT rp exists (8x8->16 unsigned) but is useless for {-2,-1,0,1}
+weights.
 """
 
 from typing import List, Dict, Tuple

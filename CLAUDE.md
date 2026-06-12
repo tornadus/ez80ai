@@ -61,7 +61,7 @@ Training data -> `train.py` -> model (.pt) -> `exportmodel.py` -> model (.npz) -
 - **Input encoding**: spec-driven (currently 1024 dims) -- first half from trigram hashing of input text (fuzzy, order-invariant), second half from context encoding of recently generated characters.
 - **Hidden layers**: spec-driven (currently 1600->1408->896), ReLU activation, per-layer arithmetic right-shift between layers.
 - **Output**: 43 neurons (space + digits + letters + punctuation + EOS), dual bias sets (first 3 chars vs rest). Argmax selects next character. Output shift is larger (currently 4) so logits fit the device's int16 stores.
-- **Weight packing**: 4 weights per byte (2-bit). On device, 2-bit layers use sparse-input column-major packing (4 consecutive neurons per byte) with a RAM-resident 24-bit accumulator array and jump-table byte dispatch -- ~8.7x faster than the old row-major loop and bit-exact (see CAVEAT_AUDIT.md + commits 7f27af8/5ecca03).
+- **Weight packing**: 4 weights per byte (2-bit). On device, 2-bit layers use sparse-input column-major packing (4 consecutive neurons per byte) with a RAM-resident 24-bit accumulator array and jump-table byte dispatch -- ~8.7x faster than the old row-major loop and bit-exact (commits 7f27af8/5ecca03; instruction notes in the libez80.py header).
 - **Integer math**: All accumulation uses 24-bit signed integers (eZ80 native register width); inter-layer activations and logits are stored int16.
 
 ### eZ80 ADL mode caveats
