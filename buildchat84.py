@@ -326,8 +326,8 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
     ctx_orders = spec['context_ngram_orders']
     ctx_max_order = max(ctx_orders)
     assert (qb & (qb - 1)) == 0 and (cb & (cb - 1)) == 0, "bucket counts must be pow2"
-    assert qb <= 256 and cb <= 256, \
-        "emitted tokenizer masks buckets with an 8-bit AND; bucket counts must be <= 256"
+    assert qb <= 4096 and cb <= 4096, \
+        "emitted tokenizer masks the 16-bit rolling hash; bucket counts must be <= 4096"
     assert ctx_orders == list(range(1, ctx_max_order + 1)), \
         "emitted tokenizer supports contiguous context n-gram orders 1..N only"
     assert spec['query_ngram_orders'] == [3], "emitted tokenizer is trigram-query only"
@@ -954,13 +954,23 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
     b.pop_bc()
     b.djnz('CTX_HLOOP')
 
-    # bucket = (hash & (cb-1)); context region starts at TOKBUF + qb buckets
-    b.ld_a_l()
-    b.and_n(cb - 1)
-
-    # Add to bucket (context is at TOKBUF + query_buckets*2 bytes)
-    b.ld_hl_nn(0)
-    b.ld_l_a()
+    # bucket = (hash & (cb-1)); context region starts at TOKBUF + qb buckets.
+    # The hash lives in 16-bit HL (its bits 16-23 are stale from .SIS math),
+    # so rebuild a clean 24-bit HL from the masked low 16 bits. For pow2
+    # cb > 256 the low mask byte is 0xFF, so only H needs the AND.
+    if cb <= 256:
+        b.ld_a_l()
+        b.and_n(cb - 1)
+        b.ld_hl_nn(0)
+        b.ld_l_a()
+    else:
+        b.ld_a_h()
+        b.and_n((cb - 1) >> 8)
+        b.ld_b_a()
+        b.ld_a_l()
+        b.ld_hl_nn(0)
+        b.ld_l_a()
+        b.ld_h_b()
     b.add_hl_hl()
     b.ld_de_label('TOKBUF')
     b.ld_bc_nn(qb * 2)
@@ -1022,12 +1032,18 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
         b.pop_hl()
         b.ld_a_n(shift); b.ld_mem_label_a('LSHIFT')  # per-layer right-shift
         if bits == 2:
-            # The fast 2-bit LAYER counts packed BYTES in an 8-bit counter
-            # (dec-from-0 wraps, so a stored 0 means 256 bytes = 1024 inputs).
-            assert in_size <= 1024, \
-                f"2-bit LAYER byte counter is 8-bit; input dim {in_size} > 1024"
-            b.ld_a_n((in_size // 4) & 0xFF)
+            # The fast 2-bit LAYER counts packed BYTES in a two-level 8-bit
+            # counter: INCNT8 holds the first page's byte count (dec-from-0
+            # wraps, so a stored 0 means a full 256-byte page) and INPAGES the
+            # number of 256-byte pages; every page after the first is full.
+            in_bytes = in_size // 4
+            assert in_size % 4 == 0, f"2-bit input dim {in_size} not a multiple of 4"
+            assert in_size <= 256 * 1024, \
+                f"2-bit LAYER page counter is 8-bit; input dim {in_size} > 262144"
+            b.ld_a_n(in_bytes & 0xFF)
             b.ld_mem_label_a('INCNT8')
+            b.ld_a_n((in_bytes + 255) // 256)
+            b.ld_mem_label_a('INPAGES')
         b.jp(f'LAYER_B{bits}')                        # per-bit-width LAYER variant
 
     for plan in layer_plan:
@@ -1074,7 +1090,8 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
     def emit_layer_routine_b2():
         """Fast 2-bit LAYER. Same entry contract as the generic variant
         (HL=weights, DE=bias, IX=input, IY=output, NEURCNT/LSHIFT set; the stub
-        additionally sets INCNT8 = input_dim/4 packed bytes), but the inner loop
+        additionally sets INCNT8/INPAGES = packed bytes of the first page /
+        page count, see emit_stub), but the inner loop
         keeps all per-weight state in registers instead of absolute memory:
 
           HL = 24-bit accumulator         BC = packed-weight byte pointer
@@ -1103,6 +1120,8 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
         b.ld_hl_nn(0)                   # ACC = 0
         b.ld_a_mem_label('INCNT8')
         b.ld_mem_label_a('BCNT')
+        b.ld_a_mem_label('INPAGES')
+        b.ld_mem_label_a('BPAGE')
 
         b.label('LBYTE_B2')
         b.ld_a_bc()                     # A = packed byte (4 x 2-bit codes)
@@ -1147,6 +1166,12 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
         b.ld_a_mem_label('BCNT')
         b.dec_a()
         b.ld_mem_label_a('BCNT')
+        b.jp_nz('LBYTE_B2')
+        # Page boundary: BCNT just hit 0, so the next page (if any) re-enters
+        # LBYTE_B2 with BCNT=0, which dec-wraps to a full 256-byte page.
+        b.ld_a_mem_label('BPAGE')
+        b.dec_a()
+        b.ld_mem_label_a('BPAGE')
         b.jp_nz('LBYTE_B2')
 
         # Neuron done: hand ACC and the advanced weight pointer back to memory,
@@ -1619,11 +1644,21 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
     b.ld_b_n(0)
     b.add_hl_bc_16()
 
-    b.ld_a_l()
-    b.and_n(qb - 1)               # query bucket = hash & (query_buckets - 1)
-
-    b.ld_hl_nn(0)
-    b.ld_l_a()
+    # query bucket = hash & (query_buckets - 1). Same 16-bit-mask pattern as
+    # the context encoder: HL bits 16-23 are stale, rebuild a clean 24-bit HL.
+    if qb <= 256:
+        b.ld_a_l()
+        b.and_n(qb - 1)
+        b.ld_hl_nn(0)
+        b.ld_l_a()
+    else:
+        b.ld_a_h()
+        b.and_n((qb - 1) >> 8)
+        b.ld_b_a()
+        b.ld_a_l()
+        b.ld_hl_nn(0)
+        b.ld_l_a()
+        b.ld_h_b()
     b.add_hl_hl()
     b.push_de()
     b.ld_de_label('TOKBUF')
@@ -1905,8 +1940,10 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
     b.label('SAVB');    b.d3(0)
     b.label('CURIN');   b.d3(0)
     b.label('INBASE');  b.d3(0)      # input-buffer base (3-byte; LD (nn),IX / LD IX,(nn))
-    b.label('INCNT8');  b.db(0)      # packed bytes per input row (in_size/4 mod 256)
+    b.label('INCNT8');  b.db(0)      # packed bytes per input row, first page (in_size/4 mod 256)
+    b.label('INPAGES'); b.db(0)      # number of 256-byte pages per input row
     b.label('BCNT');    b.db(0)      # working byte counter for the 2-bit inner loop
+    b.label('BPAGE');   b.db(0)      # working page counter for the 2-bit inner loop
     b.label('PACKED');  b.db(0)
     b.label('WEIGHT');  b.db(0)
     b.label('LSHIFT');     b.db(0)   # per-layer right-shift, set by each stub
