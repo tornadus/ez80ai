@@ -275,6 +275,7 @@ class eZ80Builder:
 
     # === IX/IY indexed loads ===
 
+    def ld_a_ixd(self, d): self.emit(0xDD, 0x7E, d & 0xFF)  # LD A,(IX+d)
     def ld_l_ixd(self, d): self.emit(0xDD, 0x6E, d & 0xFF)
     def ld_h_ixd(self, d): self.emit(0xDD, 0x66, d & 0xFF)
     def ld_e_ixd(self, d): self.emit(0xDD, 0x5E, d & 0xFF)  # LD E,(IX+d)
@@ -285,6 +286,13 @@ class eZ80Builder:
     def ld_iyd_h(self, d): self.emit(0xFD, 0x74, d & 0xFF)
     def ld_iyd_d(self, d): self.emit(0xFD, 0x72, d & 0xFF)  # LD (IY+d),D
     def ld_iyd_e(self, d): self.emit(0xFD, 0x73, d & 0xFF)  # LD (IY+d),E
+
+    # 24-bit register-pair load/store through IY+d — core eZ80 ADL forms
+    # (CEmu cpu.c:1142-1148: x=0,z=7 with the FD prefix; q selects load vs
+    # store, p=2 selects HL; cpu_read_word/cpu_write_word move 3 bytes in
+    # ADL mode). The enabler for the RAM-resident 24-bit accumulator array.
+    def ld_hl_iyd(self, d): self.emit(0xFD, 0x27, d & 0xFF)  # LD HL,(IY+d)
+    def ld_iyd_hl(self, d): self.emit(0xFD, 0x2F, d & 0xFF)  # LD (IY+d),HL
 
     # === Stack pointer loads ===
 
@@ -329,6 +337,7 @@ class eZ80Builder:
     def and_a(self): self.emit(0xA7)
     def or_a(self): self.emit(0xB7)
     def or_c(self): self.emit(0xB1)
+    def or_d(self): self.emit(0xB2)
     def or_l(self): self.emit(0xB5)
     def or_n(self, val): self.emit(0xF6, val & 0xFF)
     def xor_a(self): self.emit(0xAF)
@@ -367,6 +376,10 @@ class eZ80Builder:
         """LEA IX, IX+d (ED 32 d) -- core eZ80 instruction (emitted pervasively
         by the CE C toolchain), signed 8-bit displacement."""
         self.emit(0xED, 0x32, d & 0xFF)
+
+    def lea_iy_d(self, d):
+        """LEA IY, IY+d (ED 33 d) -- CEmu cpu.c:1397-1404 (z=3 selects IY)."""
+        self.emit(0xED, 0x33, d & 0xFF)
 
     # === Shifts and rotates ===
 

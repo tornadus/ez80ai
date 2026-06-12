@@ -357,59 +357,113 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
         The index byte makes a swapped/renamed AppVar fail loudly too."""
         return WEIGHT_MAGIC_SIG + bytes([WEIGHT_FMT_VERSION, i])
 
-    # Per-layer shard ranges; split any layer whose packed weights+bias exceed
-    # one AppVar. The output layer carries TWO bias sets (rest + start).
-    layer_plan = []
-    flat_shards = []
-    for li, name in enumerate(layer_names):
-        w = params[f'{name}_weight']
-        n_out, n_in = int(w.shape[0]), int(w.shape[1])
-        assert n_in % 4 == 0, f"layer {li} input dim {n_in} must be a multiple of 4"
-        is_out = (li == num_layers - 1)
-        bias_sets = 2 if (is_out and has_dual_bias) else 1
-        layer_bytes = (n_out * n_in * wbits[li]) // 8 + n_out * 2 * bias_sets
-        # Reserve 8 bytes per AppVar for the magic header so a shard that lands
-        # alone in a fresh AppVar still fits.
-        nsplit = max(1, -(-layer_bytes // (MAX_AV - 8)))
-        base, rem, lo, ranges = n_out // nsplit, n_out % nsplit, 0, []
+    def pack_bias24(bias_arr, padded_n, scale_shift=0):
+        """Pack a bias array as little-endian 24-bit two's-complement values
+        (optionally pre-scaled by << scale_shift, wrapping mod 2^24 exactly
+        like the 24-bit accumulator), zero-padded to `padded_n` entries.
+        Column-major layers LDIR this blob straight into the accumulator
+        array, so 'accumulator := bias' is a byte copy."""
+        data = bytearray()
+        for v in bias_arr:
+            data += struct.pack('<I', (int(v) << scale_shift) & 0xFFFFFF)[:3]
+        data += b'\x00' * (3 * (padded_n - len(bias_arr)))
+        return bytes(data)
+
+    # Two layer layouts:
+    #  * 2-bit layers are COLUMN-MAJOR ("cm"): weights are packed transposed
+    #    (4 consecutive NEURONS per packed byte, one column = one input's
+    #    weights, byte-aligned via padding n_out up to a multiple of 4) and
+    #    sharded by INPUT ranges. The layer routine iterates inputs OUTER /
+    #    neurons INNER over a RAM accumulator array, skipping zero inputs
+    #    entirely. Biases ship as pre-sign-extended 24-bit blobs (output
+    #    layer: two, pre-scaled by << shift as before).
+    #  * other bit-widths keep the legacy row-major layout, sharded by
+    #    output-neuron ranges with int16 biases.
+    appvar_blobs = {}
+    av_state = {'idx': 0, 'cur': bytearray(av_magic(0))}
+
+    def append_blob(blob):
+        """Greedy-pack one atomic blob into the AppVar stream; returns
+        (appvar_index, offset)."""
+        assert len(blob) <= MAX_AV - 8, "blob exceeds one AppVar"
+        if len(av_state['cur']) > 8 and len(av_state['cur']) + len(blob) > MAX_AV:
+            appvar_blobs[av_name(av_state['idx'])] = bytes(av_state['cur'])
+            av_state['idx'] += 1
+            av_state['cur'] = bytearray(av_magic(av_state['idx']))
+        off = len(av_state['cur'])
+        av_state['cur'] += blob
+        return av_state['idx'], off
+
+    def split_ranges(total, nsplit):
+        base, rem, lo, ranges = total // nsplit, total % nsplit, 0, []
         for k in range(nsplit):
             sz = base + (1 if k < rem else 0)
             ranges.append((lo, lo + sz)); lo += sz
-        layer_plan.append({'li': li, 'n_in': n_in, 'n_out': n_out,
-                           'shift': shifts[li], 'bits': wbits[li],
-                           'is_out': is_out, 'shards': []})
-        for (a, c) in ranges:
-            flat_shards.append((li, a, c))
+        return ranges
 
-    def shard_blobs(li, lo, hi):
-        name = layer_names[li]
-        wb = pack_weights(params[f'{name}_weight'][lo:hi, :], wbits[li])
-        if li == num_layers - 1:                       # output: bias pre-scaled
-            sh = shifts[li]
-            brest = pack_bias_bytes(params[f'{name}_bias'][lo:hi] * (1 << sh))
-            bstart = (pack_bias_bytes(params[f'{out_name}_bias_start'][lo:hi] * (1 << sh))
-                      if has_dual_bias else brest)
-            return wb, brest, bstart
-        return wb, pack_bias_bytes(params[f'{name}_bias'][lo:hi]), None
+    layer_plan = []
+    for li, name in enumerate(layer_names):
+        w = np.asarray(params[f'{name}_weight'])
+        n_out, n_in = int(w.shape[0]), int(w.shape[1])
+        is_out = (li == num_layers - 1)
+        sh = shifts[li]
+        if wbits[li] == 2:
+            # Column-major 2-bit layer.
+            col_bytes = -(-n_out // 4)
+            padded = col_bytes * 4
+            assert col_bytes <= 255 * 256, f"layer {li}: column too long"
+            plan = {'li': li, 'cm': True, 'bits': 2, 'n_in': n_in,
+                    'n_out': n_out, 'padded': padded, 'col_bytes': col_bytes,
+                    'shift': sh, 'is_out': is_out, 'shards': []}
+            if is_out:
+                plan['b'] = append_blob(pack_bias24(
+                    params[f'{name}_bias'], padded, sh))
+                plan['bs'] = (append_blob(pack_bias24(
+                    params[f'{out_name}_bias_start'], padded, sh))
+                    if has_dual_bias else plan['b'])
+            else:
+                plan['b'] = append_blob(pack_bias24(
+                    params[f'{name}_bias'], padded))
+            wpad = np.zeros((padded, n_in), dtype=np.int64)
+            wpad[:n_out] = w
+            packed = pack_weights(wpad.T, 2)      # n_in columns, col_bytes each
+            assert len(packed) == n_in * col_bytes
+            max_inputs = (MAX_AV - 8) // col_bytes
+            for (lo, hi) in split_ranges(n_in, -(-n_in // max_inputs)):
+                av, off = append_blob(packed[lo * col_bytes:hi * col_bytes])
+                plan['shards'].append({'av': av, 'w_off': off,
+                                       'lo': lo, 'hi': hi})
+        else:
+            # Legacy row-major layer (3/4-bit), sharded by output neurons.
+            assert n_in % 4 == 0, \
+                f"layer {li} input dim {n_in} must be a multiple of 4"
+            plan = {'li': li, 'cm': False, 'bits': wbits[li], 'n_in': n_in,
+                    'n_out': n_out, 'shift': sh, 'is_out': is_out,
+                    'shards': []}
+            bias_sets = 2 if (is_out and has_dual_bias) else 1
+            layer_bytes = (n_out * n_in * wbits[li]) // 8 + n_out * 2 * bias_sets
+            nsplit = max(1, -(-layer_bytes // (MAX_AV - 8)))
+            for (lo, hi) in split_ranges(n_out, nsplit):
+                wb = pack_weights(w[lo:hi, :], wbits[li])
+                if is_out:
+                    b1 = pack_bias_bytes(params[f'{name}_bias'][lo:hi] * (1 << sh))
+                    b2 = (pack_bias_bytes(
+                        params[f'{out_name}_bias_start'][lo:hi] * (1 << sh))
+                        if has_dual_bias else b1)
+                else:
+                    b1, b2 = pack_bias_bytes(params[f'{name}_bias'][lo:hi]), None
+                blob = wb + b1 + (b2 if b2 is not None else b'')
+                av, w_off = append_blob(blob)
+                b_off = w_off + len(wb)
+                bs_off = (b_off + len(b1)) if b2 is not None else None
+                plan['shards'].append({'av': av, 'w_off': w_off, 'b_off': b_off,
+                                       'bs_off': bs_off, 'lo': lo, 'hi': hi})
+        layer_plan.append(plan)
+    appvar_blobs[av_name(av_state['idx'])] = bytes(av_state['cur'])
+    av_names = [av_name(i) for i in range(av_state['idx'] + 1)]
 
-    appvar_blobs = {}
-    av_idx, cur = 0, bytearray(av_magic(0))
-    for (li, lo, hi) in flat_shards:
-        wb, b1, b2 = shard_blobs(li, lo, hi)
-        sz = len(wb) + len(b1) + (len(b2) if b2 is not None else 0)
-        if len(cur) > 8 and len(cur) + sz > MAX_AV:
-            appvar_blobs[av_name(av_idx)] = bytes(cur)
-            av_idx += 1; cur = bytearray(av_magic(av_idx))
-        w_off = len(cur); cur += wb
-        b_off = len(cur); cur += b1
-        bs_off = None
-        if b2 is not None:
-            bs_off = len(cur); cur += b2
-        layer_plan[li]['shards'].append(
-            {'av': av_idx, 'w_off': w_off, 'b_off': b_off, 'bs_off': bs_off,
-             'lo': lo, 'hi': hi})
-    appvar_blobs[av_name(av_idx)] = bytes(cur)
-    av_names = [av_name(i) for i in range(av_idx + 1)]
+    # RAM accumulator array for column-major layers (24-bit per neuron).
+    acc_bytes = max((p['padded'] * 3 for p in layer_plan if p['cm']), default=0)
 
     # Ping-pong buffer assignment: layer 0 reads TOKBUF, the output layer writes
     # OUTBUF, hidden layers alternate PING/PONG (in != out every layer).
@@ -1002,12 +1056,59 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
     b.jp('ENCODE_CTX')
 
 
-    # === Layer dispatch stubs (generic; one per shard) ===
-    # Each stub loads its weight/bias pointers (AVPTRn + offset), input/output
-    # buffers (output offset for split layers), dimensions, and the per-layer
-    # right-shift (LSHIFT, applied at runtime in LAYER), then jumps to LAYER.
+    # === Layer dispatch stubs ===
+    # Column-major (2-bit) layers get three kinds of stubs:
+    #   INIT  — LDIR the 24-bit bias blob into the ACCBUF accumulator array
+    #           (output layer: one INIT per bias set, selected by GENPOS);
+    #   shard — point SAVW/INPTR at the shard's weights and input range, set
+    #           the input count + per-column byte counters, jump to LAYER_CM;
+    #   EPI   — walk ACCBUF, arithmetic-shift each 24-bit accumulator by the
+    #           layer shift and store int16 into the output buffer (LAYER_EPI).
+    # Legacy (3/4-bit) layers keep the old per-output-shard stub + LAYER_Bn.
+    def emit_cm_init_stub(label, av_off, nbytes):
+        av, off = av_off
+        b.label(label)
+        b.ld_hl_mem_label(f'AVPTR{av}')
+        if off > 0:
+            b.ld_de_nn(off); b.add_hl_de()
+        b.ld_de_label('ACCBUF')
+        b.ld_bc_nn(nbytes)
+        b.ldir()
+        b.ret()
+
+    def emit_cm_shard_stub(label, av, w_off, in_buf, lo, hi, col_bytes):
+        b.label(label)
+        b.ld_hl_mem_label(f'AVPTR{av}')              # SAVW = shard weight ptr
+        if w_off > 0:
+            b.ld_de_nn(w_off); b.add_hl_de()
+        b.ld_mem_label_hl('SAVW')
+        b.ld_hl_label(in_buf)                        # INPTR = in_buf + 2*lo
+        if lo > 0:
+            b.ld_de_nn(2 * lo); b.add_hl_de()
+        b.ld_mem_label_hl('INPTR')
+        b.ld_hl_nn(hi - lo)                          # inputs in this shard
+        b.ld_mem_label_hl('INCNT')
+        b.ld_a_n(col_bytes & 0xFF)                   # two-level column counter
+        b.ld_mem_label_a('ROWB8')
+        b.ld_a_n((col_bytes + 255) // 256)
+        b.ld_mem_label_a('ROWPAGES')
+        b.ld_hl_nn(col_bytes)                        # zero-input skip distance
+        b.ld_mem_label_hl('ROWBYTES')
+        b.jp('LAYER_CM')
+
+    def emit_cm_epi_stub(label, out_buf, n_out, shift):
+        b.label(label)
+        b.ld_a_n(shift)
+        b.ld_mem_label_a('LSHIFT')
+        b.ld_hl_nn(n_out)
+        b.ld_mem_label_hl('NEURCNT')
+        b.ld_iy_label(out_buf)
+        b.ld_hl_label('ACCBUF')
+        b.jp('LAYER_EPI')
+
     def emit_stub(label, av_idx, w_off, b_off, in_buf, out_buf, out_off,
                   in_size, out_size, shift, bits):
+        assert bits != 2, "2-bit layers use the column-major stubs"
         b.label(label)
         b.ld_hl_mem_label(f'AVPTR{av_idx}')        # HL = weight pointer
         if w_off > 0:
@@ -1031,225 +1132,239 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
         b.ld_hl_nn(in_size); b.ld_mem_label_hl('INCNT')
         b.pop_hl()
         b.ld_a_n(shift); b.ld_mem_label_a('LSHIFT')  # per-layer right-shift
-        if bits == 2:
-            # The fast 2-bit LAYER counts packed BYTES in a two-level 8-bit
-            # counter: INCNT8 holds the first page's byte count (dec-from-0
-            # wraps, so a stored 0 means a full 256-byte page) and INPAGES the
-            # number of 256-byte pages; every page after the first is full.
-            in_bytes = in_size // 4
-            assert in_size % 4 == 0, f"2-bit input dim {in_size} not a multiple of 4"
-            assert in_size <= 256 * 1024, \
-                f"2-bit LAYER page counter is 8-bit; input dim {in_size} > 262144"
-            b.ld_a_n(in_bytes & 0xFF)
-            b.ld_mem_label_a('INCNT8')
-            b.ld_a_n((in_bytes + 255) // 256)
-            b.ld_mem_label_a('INPAGES')
         b.jp(f'LAYER_B{bits}')                        # per-bit-width LAYER variant
 
     for plan in layer_plan:
         li, in_buf, out_buf = plan['li'], plan['in_buf'], plan['out_buf']
         shift, bits = plan['shift'], plan['bits']
-        for k, sh in enumerate(plan['shards']):
-            in_size, out_size, out_off = plan['n_in'], sh['hi'] - sh['lo'], sh['lo'] * 2
+        if plan['cm']:
             if plan['is_out']:
-                emit_stub(f'L{li}_R{k}', sh['av'], sh['w_off'], sh['b_off'],
-                          in_buf, out_buf, out_off, in_size, out_size, shift, bits)
-                emit_stub(f'L{li}_S{k}', sh['av'], sh['w_off'], sh['bs_off'],
-                          in_buf, out_buf, out_off, in_size, out_size, shift, bits)
+                emit_cm_init_stub(f'L{li}_INIT_R', plan['b'], plan['padded'] * 3)
+                emit_cm_init_stub(f'L{li}_INIT_S', plan['bs'], plan['padded'] * 3)
             else:
-                emit_stub(f'L{li}_{k}', sh['av'], sh['w_off'], sh['b_off'],
-                          in_buf, out_buf, out_off, in_size, out_size, shift, bits)
+                emit_cm_init_stub(f'L{li}_INIT', plan['b'], plan['padded'] * 3)
+            for k, sh in enumerate(plan['shards']):
+                emit_cm_shard_stub(f'L{li}_{k}', sh['av'], sh['w_off'], in_buf,
+                                   sh['lo'], sh['hi'], plan['col_bytes'])
+            emit_cm_epi_stub(f'L{li}_EPI', out_buf, plan['n_out'], shift)
+        else:
+            for k, sh in enumerate(plan['shards']):
+                in_size, out_size, out_off = (plan['n_in'], sh['hi'] - sh['lo'],
+                                              sh['lo'] * 2)
+                if plan['is_out']:
+                    emit_stub(f'L{li}_R{k}', sh['av'], sh['w_off'], sh['b_off'],
+                              in_buf, out_buf, out_off, in_size, out_size,
+                              shift, bits)
+                    emit_stub(f'L{li}_S{k}', sh['av'], sh['w_off'], sh['bs_off'],
+                              in_buf, out_buf, out_off, in_size, out_size,
+                              shift, bits)
+                else:
+                    emit_stub(f'L{li}_{k}', sh['av'], sh['w_off'], sh['b_off'],
+                              in_buf, out_buf, out_off, in_size, out_size,
+                              shift, bits)
 
     # === FORWARD: full forward pass (all layers + genpos-selected output) ===
+    def emit_layer_calls(plan, bias_suffix=''):
+        """CALL sequence for one layer. For cm layers the bias is applied by
+        the INIT stub (accumulators := bias blob), so the dual-bias choice is
+        an INIT choice; the shard + epilogue calls are bias-independent."""
+        li = plan['li']
+        if plan['cm']:
+            b.call(f'L{li}_INIT{bias_suffix}')
+            for k in range(len(plan['shards'])):
+                b.call(f'L{li}_{k}')
+            b.call(f'L{li}_EPI')
+        else:
+            for k in range(len(plan['shards'])):
+                b.call(f'L{li}{bias_suffix}{k}' if bias_suffix
+                       else f'L{li}_{k}')
+
     b.label('FORWARD')
     for plan in layer_plan[:-1]:                    # hidden layers
-        for k in range(len(plan['shards'])):
-            b.call(f"L{plan['li']}_{k}")
+        emit_layer_calls(plan)
         b.ld_bc_nn(plan['n_out'])                   # ReLU over the full layer output
         b.ld_hl_label(plan['out_buf'])
         b.call('RELU')
     out_plan = layer_plan[-1]
     b.ld_a_mem_label('GENPOS')
     b.cp_n(dual_bias_threshold)
-    b.jr_nc('FWD_REST')
-    for k in range(len(out_plan['shards'])):        # first chars: start bias
-        b.call(f"L{out_plan['li']}_S{k}")
-    b.ret()
-    b.label('FWD_REST')
-    for k in range(len(out_plan['shards'])):        # rest: rest bias
-        b.call(f"L{out_plan['li']}_R{k}")
-    b.ret()
+    if out_plan['cm']:
+        # Only the accumulator INIT differs between the two bias sets.
+        b.jr_nc('FWD_REST')
+        b.call(f"L{out_plan['li']}_INIT_S")          # first chars: start bias
+        b.jr('FWD_OUT')
+        b.label('FWD_REST')
+        b.call(f"L{out_plan['li']}_INIT_R")          # rest: rest bias
+        b.label('FWD_OUT')
+        for k in range(len(out_plan['shards'])):
+            b.call(f"L{out_plan['li']}_{k}")
+        b.call(f"L{out_plan['li']}_EPI")
+        b.ret()
+    else:
+        b.jr_nc('FWD_REST')
+        emit_layer_calls(out_plan, '_S')             # first chars: start bias
+        b.ret()
+        b.label('FWD_REST')
+        emit_layer_calls(out_plan, '_R')             # rest: rest bias
+        b.ret()
 
-    # === LAYER: neural-net layer computation (one variant per weight bit-width) ===
-    # 24-bit native accumulator. 2-bit weights (the production width) get a fast
-    # register-resident loop (emit_layer_routine_b2); wider widths use the
-    # generic per-weight loop with MULADD_GEN. Internal labels are suffixed per
-    # variant. Both decode 8//bits codes per packed byte, code = w + 2^(bits-1),
-    # zero-skip sentinel = zero_byte(bits).
+    # === LAYER: neural-net layer computation ===
+    # 24-bit native accumulator. 2-bit weights (the production width) run the
+    # COLUMN-MAJOR sparse-input engine (LAYER_CM + LAYER_EPI); wider widths use
+    # the legacy row-major per-weight loop with MULADD_GEN. Both decode 8//bits
+    # codes per packed byte, code = w + 2^(bits-1), zero-skip sentinel =
+    # zero_byte(bits).
 
-    def emit_layer_routine_b2():
-        """Fast 2-bit LAYER. Same entry contract as the generic variant
-        (HL=weights, DE=bias, IX=input, IY=output, NEURCNT/LSHIFT set; the stub
-        additionally sets INCNT8/INPAGES = packed bytes of the first page /
-        page count, see emit_stub), but the inner loop
-        keeps all per-weight state in registers instead of absolute memory:
+    def emit_layer_cm():
+        """Column-major sparse-input 2-bit LAYER.
 
-          HL = 24-bit accumulator         BC = packed-weight byte pointer
-          DE = current input value (upper byte held at 0 -- inputs are
-               non-negative 16-bit post-ReLU/encoding counts, the same
-               invariant the old loop's one-time LD DE,0 relied on)
-          IX = input element pointer      IY = output pointer (epilogue only)
-          A  = packed byte, consumed 2 bits per code via RRCA
+        Iterates INPUTS outer / NEURONS inner over a 24-bit accumulator array
+        (ACCBUF) that the INIT stub pre-loaded with the bias blob. A zero
+        input element skips its whole weight column (one load+test+pointer
+        bump) — the dominant win: layer-1 inputs are ~96% zero and ReLU
+        activations 56-80% zero. Register budget in the column loop:
 
-        The 4 codes of each byte are unrolled and processed LSB-first with
-        sequential 24-bit add/sub -- the exact weight order and arithmetic of
-        the old loop, so ACC matches it (and intkernel.forward_device)
-        bit-for-bit. The bias/shift/store epilogue is unchanged."""
+          IX = packed-weight byte pointer  DE = input value (upper byte 0 —
+          IY = accumulator pointer              inputs are non-negative int16,
+          HL = 24-bit accumulator scratch       the old loop's invariant)
+          A  = packed byte (2 bits/code via RRCA)
+          B/C = two-level column byte counter (DJNZ; B==0 means a full page)
+
+        BIT-EXACTNESS: 24-bit wrapping adds are commutative/associative, so
+        accumulating per-input columns instead of per-neuron rows, and adding
+        the bias FIRST (INIT) instead of last, produces the same accumulator
+        mod 2^24 as the old loop; LAYER_EPI then applies the identical
+        SRA;RR;RR floor shift and int16 store. Skipping a zero input adds
+        exactly 0. faithgate proves all of this on the literal bytes.
+
+        The same carry discipline as the old loop applies: OR A clears carry
+        before EVERY SBC (a leaked borrow silently diverges from the sim)."""
         zb = zero_byte(2)               # 0xAA = all-four-weights-zero sentinel
 
-        b.label('LAYER_B2')
-        b.ld_mem_label_hl('SAVW')       # weight pointer -> SAVW (safe LD (nn),HL)
-        b.ex_de_hl()                    # bias pointer (DE) -> SAVB via HL (caveat #2)
-        b.ld_mem_label_hl('SAVB')
-        b.ld_mem_label_ix('INBASE')     # input base; reloaded into IX per neuron
+        b.label('LAYER_CM')
+        b.ld_de_nn(0)                   # clear DE upper byte once
+        b.label('CM_INPUT')
+        b.ld_ix_mem_label('INPTR')      # next input element
+        b.ld_e_ixd(0)
+        b.ld_d_ixd(1)
+        b.lea_ix_d(2)
+        b.ld_mem_label_ix('INPTR')
+        b.ld_a_e()
+        b.or_d()
+        b.jp_z('CM_SKIP')               # input == 0: skip the whole column
 
-        b.label('LNEUR_B2')
-        b.ld_ix_mem_label('INBASE')
-        b.ld_bc_mem_label('SAVW')       # ED-prefixed LOAD (safe; only stores are not)
-        b.ld_de_nn(0)                   # clear DE upper byte once for 8-bit addend loads
-        b.ld_hl_nn(0)                   # ACC = 0
-        b.ld_a_mem_label('INCNT8')
-        b.ld_mem_label_a('BCNT')
-        b.ld_a_mem_label('INPAGES')
-        b.ld_mem_label_a('BPAGE')
+        b.ld_ix_mem_label('SAVW')       # IX = packed weight byte pointer
+        b.ld_iy_label('ACCBUF')         # IY = accumulator array base
+        b.ld_a_mem_label('ROWB8')       # two-level column counter -> B/C
+        b.ld_b_a()
+        b.ld_a_mem_label('ROWPAGES')
+        b.ld_c_a()
 
-        b.label('LBYTE_B2')
-        b.ld_a_bc()                     # A = packed byte (4 x 2-bit codes)
-        b.inc_bc()
+        b.label('CM_BYTE')
+        b.ld_a_ixd(0)                   # A = packed byte (4 neurons' codes)
+        b.inc_ix()
         b.cp_n(zb)
-        b.jp_z('LSKIP_B2')              # ZERO-SKIP: all 4 weights zero
+        b.jp_z('CM_ZB')                 # ZERO-SKIP: all 4 weights zero
         for k in range(4):
-            # code -> weight: 0 -> -2, 1 -> -1, 2 -> 0, 3 -> +1. Two RRCAs per
-            # code on every path, so A always holds the next code in its low
-            # bits. RRCA touches only carry; LD never touches flags; OR A
-            # clears carry while preserving A.
+            # code -> weight: 0 -> -2, 1 -> -1, 2 -> 0, 3 -> +1 (LSB first),
+            # accumulator slot k at IY + 3k. Two RRCAs per code on every path.
             b.rrca()
-            b.jr_c(f'LB2_ODD{k}')
+            b.jr_c(f'CMO{k}')
             b.rrca()
-            b.jr_c(f'LB2_NEXT{k}')      # code 2: weight 0, no work
-            # code 0: weight -2 = two subtractions. The carry MUST be cleared
-            # before BOTH SBCs -- a leaked borrow computes ACC - 2*DE - borrow
-            # and silently diverges from the sim (the old MULADD's MA_NEG had
-            # exactly this bug once). faithgate runs these literal bytes, but
-            # keep the invariant in mind when editing.
-            b.ld_e_ixd(2 * k)
-            b.ld_d_ixd(2 * k + 1)
+            b.jr_c(f'CMN{k}')           # code 2: weight 0, no work
+            b.ld_hl_iyd(3 * k)          # code 0: weight -2 = two subtractions
             b.or_a()
             b.sbc_hl_de()
             b.or_a()
             b.sbc_hl_de()
-            b.jr(f'LB2_NEXT{k}')
-            b.label(f'LB2_ODD{k}')
+            b.ld_iyd_hl(3 * k)
+            b.jr(f'CMN{k}')
+            b.label(f'CMO{k}')
             b.rrca()
-            b.ld_e_ixd(2 * k)
-            b.ld_d_ixd(2 * k + 1)
-            b.jr_c(f'LB2_POS{k}')       # code 3: weight +1
+            b.ld_hl_iyd(3 * k)
+            b.jr_c(f'CMP{k}')           # code 3: weight +1
             b.or_a()                    # code 1: weight -1
             b.sbc_hl_de()
-            b.jr(f'LB2_NEXT{k}')
-            b.label(f'LB2_POS{k}')
+            b.ld_iyd_hl(3 * k)
+            b.jr(f'CMN{k}')
+            b.label(f'CMP{k}')
             b.add_hl_de()
-            b.label(f'LB2_NEXT{k}')
+            b.ld_iyd_hl(3 * k)
+            b.label(f'CMN{k}')
+        b.label('CM_ZB')
+        b.lea_iy_d(12)                  # 4 neurons x 3 bytes
+        b.djnz('CM_T')                  # column loop (trampoline: out of JR range)
+        b.dec_c()                       # page boundary; B==0 dec-wraps to 256
+        b.jp_nz('CM_BYTE')
+        b.ld_mem_label_ix('SAVW')       # column done: persist weight pointer
+        b.jr('CM_NEXT')
+        b.label('CM_T')
+        b.jp('CM_BYTE')
 
-        b.label('LSKIP_B2')
-        b.lea_ix_d(8)                   # advance input past the byte's 4 elements
-        b.ld_a_mem_label('BCNT')
-        b.dec_a()
-        b.ld_mem_label_a('BCNT')
-        b.jp_nz('LBYTE_B2')
-        # Page boundary: BCNT just hit 0, so the next page (if any) re-enters
-        # LBYTE_B2 with BCNT=0, which dec-wraps to a full 256-byte page.
-        b.ld_a_mem_label('BPAGE')
-        b.dec_a()
-        b.ld_mem_label_a('BPAGE')
-        b.jp_nz('LBYTE_B2')
+        b.label('CM_SKIP')              # zero input: weight ptr += ROWBYTES
+        b.ld_hl_mem_label('SAVW')
+        b.ld_de_mem_label('ROWBYTES')   # <= 65280, so DE's upper byte stays 0
+        b.add_hl_de()
+        b.ld_mem_label_hl('SAVW')
 
-        # Neuron done: hand ACC and the advanced weight pointer back to memory,
-        # then run the same bias + shift + store epilogue as the generic variant.
-        b.ld_mem_label_hl('ACC')
-        b.push_bc()
-        b.pop_hl()
-        b.ld_mem_label_hl('SAVW')       # persist weight pointer for next neuron
+        b.label('CM_NEXT')
+        b.ld_hl_mem_label('INCNT')      # next input element
+        b.dec_hl()
+        b.ld_mem_label_hl('INCNT')
+        b.ld_a_h()
+        b.or_l()
+        b.jp_nz('CM_INPUT')
+        b.ret()
 
-        # Post inner loop: add bias THEN shift (output bias is pre-scaled, so this
-        # matches (matmul >> shift) + bias for the output layer too).
-        b.ld_hl_label('ACC')
+        # --- LAYER_EPI: ACCBUF -> output buffer ---
+        # Per neuron: A:D:E = 24-bit accumulator (bias included), arithmetic
+        # right shift by LSHIFT (SRA;RR;RR = floor, same as the old epilogue),
+        # store low int16. The separate RELU pass (FORWARD) is unchanged.
+        b.label('LAYER_EPI')
+        b.label('EPI_LOOP')
         b.ld_e_hl()
         b.inc_hl()
         b.ld_d_hl()
         b.inc_hl()
         b.ld_a_hl()
-
-        b.ld_hl_mem_label('SAVB')
-        b.ld_c_hl()                       # LD C, (HL)
         b.inc_hl()
-        b.ld_b_hl()
-        b.inc_hl()
-        b.ld_mem_label_hl('SAVB')
 
-        b.ld_h_a()
-        b.ld_a_e()
-        b.add_a_c()                      # ADD A, C
-        b.ld_e_a()
-        b.ld_a_d()
-        b.adc_a_b()                      # ADC A, B
-        b.ld_d_a()
-        b.push_af()
-        b.ld_a_b()
-        b.add_a_a()
-        b.sbc_a_a()                      # SBC A, A
-        b.ld_b_a()
-        b.pop_af()
-        b.ld_a_h()
-        b.adc_a_b()                      # ADC A, B
-
-        # Arithmetic right shift by LSHIFT (per-layer divide; SRA;RR;RR = floor).
         b.push_af()
         b.ld_a_mem_label('LSHIFT')
         b.ld_mem_label_a('LSHIFT_CNT')
         b.pop_af()
-        b.label('LSH_LOOP_B2')
+        b.label('EPI_SH')
         b.push_af()
         b.ld_a_mem_label('LSHIFT_CNT')
         b.or_a()
-        b.jr_z('LSH_DONE_B2')
+        b.jr_z('EPI_SHD')
         b.dec_a()
         b.ld_mem_label_a('LSHIFT_CNT')
         b.pop_af()
-        b.sra_a()                         # SRA A
-        b.rr_d()                          # RR D
-        b.rr_e()                          # RR E
-        b.jr('LSH_LOOP_B2')
-        b.label('LSH_DONE_B2')
+        b.sra_a()                       # SRA A
+        b.rr_d()                        # RR D
+        b.rr_e()                        # RR E
+        b.jr('EPI_SH')
+        b.label('EPI_SHD')
         b.pop_af()
 
-        # Store result to output buffer
-        b.ld_iyd_e(0x00)                 # LD (IY+0), E
-        b.ld_iyd_d(0x01)                 # LD (IY+1), D
+        b.ld_iyd_e(0x00)                # store int16 result
+        b.ld_iyd_d(0x01)
         b.inc_iy()
         b.inc_iy()
 
-        # Outer loop: decrement neuron counter
+        b.push_hl()
         b.ld_hl_mem_label('NEURCNT')
         b.dec_hl()
         b.ld_mem_label_hl('NEURCNT')
         b.ld_a_h()
         b.or_l()
-        b.jp_nz('LNEUR_B2')
+        b.pop_hl()
+        b.jp_nz('EPI_LOOP')
         b.ret()
 
     def emit_layer_routine(bits):
-        assert bits != 2, "2-bit layers use the fast emit_layer_routine_b2"
+        assert bits != 2, "2-bit layers use the column-major LAYER_CM engine"
         sfx = f'_B{bits}'
         cpb = 8 // bits                 # codes per packed byte
         mask = (1 << bits) - 1
@@ -1408,10 +1523,10 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
         b.jp_nz(f'LNEUR{sfx}')
         b.ret()
 
+    if any(p['cm'] for p in layer_plan):
+        emit_layer_cm()
     for bits in sorted(set(wbits)):
-        if bits == 2:
-            emit_layer_routine_b2()
-        else:
+        if bits != 2:
             emit_layer_routine(bits)
 
     # === MULADD_GEN: general signed multiply-accumulate (for >2-bit weights) ===
@@ -1939,11 +2054,10 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
     b.label('SAVW');    b.d3(0)
     b.label('SAVB');    b.d3(0)
     b.label('CURIN');   b.d3(0)
-    b.label('INBASE');  b.d3(0)      # input-buffer base (3-byte; LD (nn),IX / LD IX,(nn))
-    b.label('INCNT8');  b.db(0)      # packed bytes per input row, first page (in_size/4 mod 256)
-    b.label('INPAGES'); b.db(0)      # number of 256-byte pages per input row
-    b.label('BCNT');    b.db(0)      # working byte counter for the 2-bit inner loop
-    b.label('BPAGE');   b.db(0)      # working page counter for the 2-bit inner loop
+    b.label('INPTR');   b.d3(0)      # column-major input element pointer
+    b.label('ROWBYTES'); b.d3(0)     # packed bytes per weight column (zero-skip)
+    b.label('ROWB8');   b.db(0)      # column bytes, first page (col_bytes mod 256)
+    b.label('ROWPAGES'); b.db(0)     # number of 256-byte pages per column
     b.label('PACKED');  b.db(0)
     b.label('WEIGHT');  b.db(0)
     b.label('LSHIFT');     b.db(0)   # per-layer right-shift, set by each stub
@@ -1976,6 +2090,9 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
     b.label('PING'); b.ds(max_hidden * 2)
     b.label('PONG'); b.ds(max_hidden * 2)
     b.label('OUTBUF'); b.ds(output_size * 2)
+    # 24-bit accumulator array for column-major layers (widest padded layer).
+    if acc_bytes:
+        b.label('ACCBUF'); b.ds(acc_bytes)
 
     # AppVar data pointers
     for i in range(len(av_names)):
@@ -2076,7 +2193,7 @@ if __name__ == '__main__':
 
     # Show key addresses
     print("\nKey addresses:")
-    for name in ['START', 'GENERATE', 'FORWARD', 'LAYER_B2', 'ARGMAX',
+    for name in ['START', 'GENERATE', 'FORWARD', 'LAYER_CM', 'ARGMAX',
                  'TOKENIZE', 'UPDATE_CTX', 'ENCODE_CTX', 'CLEAR_CTX',
                  'CHARTBL', 'TOKBUF', 'OUTBUF', 'PING', 'PONG']:
         if name in b.labels:

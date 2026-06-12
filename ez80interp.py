@@ -251,6 +251,7 @@ class CPU:
         if op == 0xA7: a.fc = False; a._setzs8(a.a); return  # AND A
         if op == 0xB7: a.fc = False; a._setzs8(a.a); return  # OR A
         if op == 0xB1: a.a |= a.c; a.fc = False; a._setzs8(a.a); return
+        if op == 0xB2: a.a |= a.d; a.fc = False; a._setzs8(a.a); return
         if op == 0xB5: a.a |= a.l; a.fc = False; a._setzs8(a.a); return
         if op == 0xAF: a.a = 0; a.fc = False; a._setzs8(0); return  # XOR A
         if op == 0xAE: a.a ^= a.r8(a.hl); a.fc = False; a._setzs8(a.a); return
@@ -409,6 +410,9 @@ class CPU:
         if op == 0xF9: a.sp = cur; return                 # LD SP,IX/IY
         if op == 0xE3:                                     # EX (SP),IX/IY
             t = a.r24(a.sp); a.w24(a.sp, cur); setidx(t); return
+        if op == 0x7E: d = _s8(a.fetch8()); a.a = a.r8((cur + d) & MASK24); return  # LD A,(idx+d)
+        if op == 0x27: d = _s8(a.fetch8()); a.hl = a.r24((cur + d) & MASK24); return  # LD HL,(idx+d) 24-bit
+        if op == 0x2F: d = _s8(a.fetch8()); a.w24((cur + d) & MASK24, a.hl); return   # LD (idx+d),HL 24-bit
         if op == 0x6E: d = _s8(a.fetch8()); a.l = a.r8((cur + d) & MASK24); return  # LD L,(idx+d)
         if op == 0x66: d = _s8(a.fetch8()); a.h = a.r8((cur + d) & MASK24); return  # LD H,(idx+d)
         if op == 0x5E: d = _s8(a.fetch8()); a.e = a.r8((cur + d) & MASK24); return  # LD E,(idx+d)
@@ -427,6 +431,8 @@ class CPU:
         if op == 0x42: a.hl = a._sbc24(a.hl, a.bc); return  # SBC HL,BC
         if op == 0x32:                                       # LEA IX,IX+d
             d = _s8(a.fetch8()); a.ix = (a.ix + d) & MASK24; return
+        if op == 0x33:                                       # LEA IY,IY+d
+            d = _s8(a.fetch8()); a.iy = (a.iy + d) & MASK24; return
         if op == 0x53: a.w24(a.fetch24(), a.de); return     # LD (nn),DE
         if op == 0x43: a.w24(a.fetch24(), a.bc); return     # LD (nn),BC
         if op == 0x4B: a.bc = a.r24(a.fetch24()); return    # LD BC,(nn)
