@@ -86,7 +86,9 @@ def main():
         bias = (bias_start if genpos < thr else biases[-1]).astype(np.int64)
         acc = intkernel.wrap_accum(
             h @ weights[-1].astype(np.int64).T + (bias << s), spec['accum_bits'])
-        return intkernel.wrap16(acc >> s)[0]
+        out = acc >> s
+        act_peak['logit'] = max(act_peak.get('logit', 0), int(np.abs(out).max()))
+        return intkernel.wrap16(out)[0]
 
     def gen(fwd, q, ml=50):
         out = ""
@@ -175,10 +177,14 @@ def main():
     #         2 bytes; the sim keeps full precision. If activations exceed int16
     #         the device silently wraps. This is the guard the dead overflow
     #         penalty never provided). ----
-    print(f"[3] peak |activation| = {act_peak['maxabs']} (int16 ceiling {INT16_MAX})")
+    print(f"[3] peak |activation| = {act_peak['maxabs']}, "
+          f"peak |logit| = {act_peak.get('logit', 0)} (int16 ceiling {INT16_MAX})")
     if act_peak['maxabs'] > INT16_MAX:
         fails.append(f"activation magnitude {act_peak['maxabs']} exceeds int16 -- "
                      f"device int16 storage would silently wrap")
+    if act_peak.get('logit', 0) > INT16_MAX:
+        fails.append(f"logit magnitude {act_peak['logit']} exceeds int16 -- OUTBUF "
+                     f"would silently wrap; raise the output inter_layer_shift")
 
     # ---- 4. query tokenization == TrigramEncoder.encode(query.strip()) ----
     # The device strips trailing spaces (READ_INPUT) and skips leading spaces

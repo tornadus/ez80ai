@@ -38,7 +38,7 @@ EXPECTED_NUM_CLASSES = 43
 # a stage may read must exist here with a sensible default.
 DEFAULT_SPEC = {
     # --- topology ---
-    "hidden_sizes": [440, 440, 256],
+    "hidden_sizes": [1600, 1408, 896],
     "num_classes": EXPECTED_NUM_CLASSES,     # validated == len(CHARSET)
     "activation": "relu",                    # enum: relu (others need kernel+codegen)
 
@@ -48,7 +48,11 @@ DEFAULT_SPEC = {
     # Scalars are the default so changing hidden_sizes "just works".
     "weight_bits": 2,                        # 2-bit today; mixed precision allowed
     "weight_quantile": 0.85,                 # per-layer scale = this pctile of |W|
-    "inter_layer_shift": 2,                  # right-shift after each layer (÷4 == 2)
+    # right-shift after each layer; scalar broadcasts, list is per-layer (output
+    # last). Output shift is 4 (not 2): logits are stored int16 on device, and
+    # the ~5M-param archs swing raw output accumulators to ~±82k>>2 — two extra
+    # bits keep every logit inside int16 (measured headroom ~37%).
+    "inter_layer_shift": [2, 2, 2, 4],
     "activation_scale": 32,                  # fixed-point input scale
     "rounding": "trunc",                     # 'trunc' (sim today) | 'floor' (device)
     "weight_grid": "default",                # 'default' {-2,-1,0,1} | 'zero_free' {-2,-1,1,2}
@@ -60,8 +64,8 @@ DEFAULT_SPEC = {
     "n_bias_buckets": 2,                     # 2 == dual; >2 reserved for later
 
     # --- encoding (a real DOF; input_size is DERIVED from the two bucket counts) ---
-    "query_buckets": 256,                    # power of two
-    "context_buckets": 256,                  # power of two
+    "query_buckets": 512,                    # power of two
+    "context_buckets": 512,                  # power of two
     "context_len": 8,
     "query_ngram_orders": [3],               # trigram query today
     "context_ngram_orders": [1, 2, 3],

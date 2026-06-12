@@ -19,6 +19,7 @@ from train import (
     generate_response, filter_legacy_state,
 )
 from encoding import TrigramEncoder, ContextEncoder
+from loadmodel import load_spec_from_model
 
 CHECKPOINT = os.path.join(os.path.dirname(__file__), 'neochat_model.pt')
 
@@ -45,15 +46,31 @@ def main():
     device = get_device(args.cpu)
     use_int = not args.float
 
-    # Load model
+    # Load model + the spec baked into the checkpoint (arch and encoding are
+    # DOFs; hardcoded defaults here would skew vs what the model was trained on)
     cp = torch.load(args.model, weights_only=False, map_location='cpu')
-    model = NeochatModel()
+    spec = load_spec_from_model(args.model)
+    model = NeochatModel(input_size=spec['input_size'],
+                         hidden_sizes=spec['hidden_sizes'],
+                         num_chars=spec['num_classes'], spec=spec)
     model.load_state_dict(filter_legacy_state(cp['model_state']))
     model.to(device)
     model.eval()
 
-    qe = TrigramEncoder()
-    ce = ContextEncoder(num_buckets=128, context_len=8)
+    signed = spec.get('signed_hash', False)
+    qe = TrigramEncoder(num_buckets=spec['query_buckets'],
+                        ngram_orders=spec['query_ngram_orders'],
+                        hash_mult=spec['query_hash']['mult'],
+                        hash_mask=spec['query_hash']['mask'],
+                        pos_offset_mult=spec['query_hash']['pos_offset_mult'],
+                        signed_hash=signed)
+    ce = ContextEncoder(num_buckets=spec['context_buckets'],
+                        context_len=spec['context_len'],
+                        ngram_orders=spec['context_ngram_orders'],
+                        hash_mult=spec['context_hash']['mult'],
+                        hash_mask=spec['context_hash']['mask'],
+                        pos_offset_mult=spec['context_hash']['pos_offset_mult'],
+                        signed_hash=signed)
 
     int_acc = cp.get('best_int_acc', 0)
     epochs = cp.get('total_epochs', 0)
