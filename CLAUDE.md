@@ -37,7 +37,7 @@ Run automated tests:
 python3 test_model.py --samples 100
 ```
 
-No formal test suite exists. Validation is done via training metrics (IntAcc) and interactive chat.
+Faithfulness gates (run after any codegen/spec change): `python3 test_intkernel.py` and `python3 test_faithfulness.py`; `ez80research/evaluate.py --samples 8000` runs the full gate set (CONTRACT/EXPORT/BUILD/FAITH/SIZE) and measures IntAcc independently.
 
 ## Architecture
 
@@ -47,8 +47,8 @@ Training data -> `train.py` -> model (.pt) -> `exportmodel.py` -> model (.npz) -
 
 ### Key modules
 
-- **`train.py`** -- Training loop. NeochatModel with dual output biases, 24-bit integer simulation, progressive quantization. Architecture: 256->512->512->256->43.
-- **`encoding.py`** -- Text encoding: TrigramEncoder (query->128 hash buckets), ContextEncoder (recent chars->128 hash buckets), training example generation, data loading.
+- **`train.py`** -- Training loop. NeochatModel with dual output biases, 24-bit integer simulation, progressive quantization. Architecture comes from `modelspec.DEFAULT_SPEC` (currently 1024 -> 1600 -> 1408 -> 896 -> 43).
+- **`encoding.py`** -- Text encoding: TrigramEncoder (query) and ContextEncoder (recent chars) hash into spec-driven bucket counts (currently 512 + 512).
 - **`libqat.py`** -- Quantization-aware training primitives. OverflowAwareLinear with 2-bit weights {-2,-1,0,+1}, straight-through estimator, 24-bit overflow regularization.
 - **`libez80.py`** -- eZ80 ADL-mode machine code builder. Emits raw instructions with label/fixup system for 24-bit address resolution. Includes .LIS/.SIS prefixed instructions for 16-bit math within 24-bit addressing mode.
 - **`loadmodel.py`** -- Loads models from .pt (PyTorch) or .npz (NumPy) formats.
@@ -58,19 +58,19 @@ Training data -> `train.py` -> model (.pt) -> `exportmodel.py` -> model (.npz) -
 
 ### Neural network design
 
-- **Input encoding**: 256 dimensions -- first 128 from trigram hashing of input text (fuzzy, order-invariant), second 128 from context encoding of recently generated characters.
-- **Hidden layers**: 512->512->256, ReLU activation, division-by-4 scaling between layers (arithmetic right-shift on eZ80).
-- **Output**: 43 neurons (space + digits + letters + punctuation + EOS), dual bias sets (first 3 chars vs rest). Argmax selects next character.
-- **Weight packing**: 4 weights per byte (2-bit, LSB first).
-- **Integer math**: All accumulation uses 24-bit signed integers (eZ80 native register width).
+- **Input encoding**: spec-driven (currently 1024 dims) -- first half from trigram hashing of input text (fuzzy, order-invariant), second half from context encoding of recently generated characters.
+- **Hidden layers**: spec-driven (currently 1600->1408->896), ReLU activation, per-layer arithmetic right-shift between layers.
+- **Output**: 43 neurons (space + digits + letters + punctuation + EOS), dual bias sets (first 3 chars vs rest). Argmax selects next character. Output shift is larger (currently 4) so logits fit the device's int16 stores.
+- **Weight packing**: 4 weights per byte (2-bit). On device, 2-bit layers use sparse-input column-major packing (4 consecutive neurons per byte) with a RAM-resident 24-bit accumulator array and jump-table byte dispatch -- ~8.7x faster than the old row-major loop and bit-exact (see CAVEAT_AUDIT.md + commits 7f27af8/5ecca03).
+- **Integer math**: All accumulation uses 24-bit signed integers (eZ80 native register width); inter-layer activations and logits are stored int16.
 
 ### eZ80 ADL mode caveats
 
-See libez80.py header for 5 documented hardware caveats affecting .LIS prefixed instructions, IY register usage, and 8-bit register loads. Note: loop counters that live next to pointers in RAM (NEURCNT/INCNT/WTCNT, adjacent to the weight pointer SAVW) use full 24-bit loads/stores -- NOT .SIS/.LIS 16-bit ops -- because a `.SIS LD HL,nn` does not clear register bits 16-23, and a stale upper byte could corrupt the adjacent pointer.
+See libez80.py header for the documented hardware caveats (suffix-prefixed instructions, IY register usage, 8-bit register loads) and **CAVEAT_AUDIT.md** for the 2026-06 audit of each against the CEmu CPU core. Two of five were misdiagnosed: the real failure of suffixed memory/stack ops is `{MBASE, addr16}` address translation (they execute in Z80 mode; ALL such forms are broken on TI-OS and are no longer emittable), and `.LIS SBC`'s S flag is mode-width-correct -- the observed failures came from S-only signed compares being overflow-blind. The workarounds all remain valid. Loop counters next to pointers in RAM still use full 24-bit loads/stores: 8-bit register loads do not clear the pair's upper byte (confirmed), and a 16-bit store into a 3-byte slot would corrupt the neighbor. (Per CEmu, suffixed 16-bit *pair* writes like `.SIS LD HL,nn` actually DO zero bits 16-23 -- the old claim here was backwards -- but Zilog documents the upper byte as undefined in Z80 mode, so the codegen never relies on it.)
 
 ### Source of truth: the device must mirror the Python sim
 
-The Python integer path (`train.py._forward_int` and `generate_response`) is the source of truth; `buildchat84.py` must reproduce it exactly. The build is only checked for compiling and fitting RAM -- its numerics are **not** compared against the sim -- so a device/sim divergence is **silent**. Do NOT add on-device-only behavior (context attention, logit/EOS heuristics, repeat fallbacks, etc.); generation is a plain argmax + dual bias that stops at EOS or 50 chars, identical to `generate_response`. A released build once shipped device-only mechanisms + a 16-bit-counter quirk and produced on-calc gibberish; both were fixed by making the calc faithful to the sim.
+The Python integer path (`train.py._forward_int` and `generate_response`) is the source of truth; `buildchat84.py` must reproduce it exactly. Numerics ARE gated: `faithgate.py` executes the emitted bytes in `ez80interp.py` (CEmu-aligned) and compares against `intkernel` bit-for-bit, and `test_faithfulness.py` checks device-contract generation against the sim end-to-end (including int16 activation/logit range pins). Run both after any codegen or spec change. Do NOT add on-device-only behavior (context attention, logit/EOS heuristics, repeat fallbacks, etc.); generation is a plain argmax + dual bias that stops at EOS or 50 chars, identical to `generate_response`. A released build once shipped device-only mechanisms + a 16-bit-counter quirk and produced on-calc gibberish; both were fixed by making the calc faithful to the sim.
 
 ### Dependencies
 
