@@ -82,7 +82,12 @@ def run_emitted(b, blobs, params, spec, query, context, genpos):
 
     cpu.w8(L['GENPOS'], genpos)
 
-    cpu.run(L[meta['forward']])      # FORWARD reads GENPOS and writes OUTBUF
+    # FORWARD's step count scales with the weight count (~7 steps/weight with
+    # zero-skip; budget 16x + slack so big specs fit and a real hang still trips).
+    dims = [spec['input_size']] + list(spec['hidden_sizes']) + [spec['num_classes']]
+    n_weights = sum(a * b for a, b in zip(dims, dims[1:]))
+    cpu.run(L[meta['forward']],      # FORWARD reads GENPOS and writes OUTBUF
+            max_steps=max(20_000_000, 16 * n_weights))
     cpu.run(L[meta['argmax']])
 
     n = meta['output_size']
