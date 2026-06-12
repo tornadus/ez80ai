@@ -41,7 +41,10 @@ def measure(model_path='model.npz', query='who are you', genpos=0):
     cpu.run(L['ENCODE_CTX'])
 
     cpu.w8(L['GENPOS'], genpos)
-    cpu.run(L[meta['forward']])
+    # FORWARD scales with the weight count; budget like faithgate does.
+    dims = [spec['input_size']] + list(spec['hidden_sizes']) + [spec['num_classes']]
+    n_weights = sum(a * b for a, b in zip(dims, dims[1:]))
+    cpu.run(L[meta['forward']], max_steps=max(20_000_000, 16 * n_weights))
     fwd_steps = cpu.steps
     cpu.run(L[meta['argmax']])
     arg_steps = cpu.steps

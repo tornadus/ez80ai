@@ -15,8 +15,14 @@ mis-executing. Only the compute routines are ever run (TOKENIZE, LAYER*, RELU*,
 ARGMAX, …); TI-OS I/O is never entered, so no syscalls are emulated.
 
 ADL mode model: BC/DE/HL/IX/IY/SP/PC are 24-bit; A/flags are 8-bit. 8-bit loads
-preserve the pair's upper byte (caveat #4). .LIS/.SIS ops compute on the low 16
-bits; the low bits — all the codegen ever reads back from them — are exact.
+preserve the pair's upper byte (caveat #4). .LIS/.SIS register ops compute on
+the low 16 bits and ZERO bits 16-23 of the written pair — matching CEmu's
+cpu_write_rp (cpu.c:322-331), which masks the value to the mode width and
+assigns the full register. Suffixed MEMORY/stack ops are not supported at all:
+on the real CPU (CEmu cpu_address_mode, cpu.c:71-76) they access
+{MBASE, addr16} and the Z80 SPS stack, never a 24-bit label address, so the
+codegen must not emit them — any attempt fails loudly here. See
+CAVEAT_AUDIT.md.
 """
 
 
@@ -361,8 +367,13 @@ class CPU:
         if op in (0x11, 0x14, 0x1A, 0x1B, 0x1D):         # RR/RL on D/E/L/C/H
             return self._cb_rot(op)
         if op in (0x7F, 0x79, 0x7A, 0x7C):               # BIT 7,r
+            # CEmu (cpu.c:1296-1301): Z = !bit, S = sign of the masked bit
+            # (set iff bit 7 is set), C preserved.
             reg = {0x7F: 'a', 0x79: 'c', 0x7A: 'd', 0x7C: 'h'}[op]
-            a.fz = not (getattr(a, reg) & 0x80); return
+            bit = getattr(a, reg) & 0x80
+            a.fz = not bit
+            a.fs = bool(bit)
+            return
         raise UnsupportedOpcode(f"CB {op:02X}")
 
     def _cb_rot(self, op):
@@ -431,7 +442,12 @@ class CPU:
             return
         raise UnsupportedOpcode(f"ED {op:02X}")
 
-    # --- .LIS prefix (16-bit register arithmetic; low 16 bits are exact) ---
+    # --- .LIS prefix (16-bit REGISTER ops only) ---
+    # CEmu semantics (cpu_write_rp, cpu.c:322-331): short-mode register-pair
+    # writes mask the value to 16 bits and assign the FULL register — bits
+    # 16-23 are ZEROED, not preserved. Suffixed memory/stack forms are
+    # rejected: on hardware they access {MBASE, addr16} / the SPS stack
+    # (cpu_address_mode, cpu.c:71-76), never the 24-bit label address.
     def _lis(self):
         op = self.fetch8()
         a = self
@@ -441,68 +457,43 @@ class CPU:
                 a.hl = a._lo16_sbc(a.hl, a.de); return
             if op2 == 0x42:                                 # SBC HL,BC (16)
                 a.hl = a._lo16_sbc(a.hl, a.bc); return
-            if op2 == 0x53: a.w16(a.fetch24(), a.de); return
-            if op2 == 0x43: a.w16(a.fetch24(), a.bc); return
-            if op2 == 0x4B: a.bc = (a.bc & 0xFF0000) | a.r16(a.fetch24()); return
-            if op2 == 0x5B: a.de = (a.de & 0xFF0000) | a.r16(a.fetch24()); return
-            if op2 == 0xB0:                                 # LDIR (16-bit count)
-                cnt = a.bc & 0xFFFF
-                while cnt != 0:
-                    a.w8(a.de, a.r8(a.hl))
-                    a.hl = (a.hl + 1) & MASK24
-                    a.de = (a.de + 1) & MASK24
-                    cnt -= 1
-                a.bc = a.bc & 0xFF0000
-                return
-            raise UnsupportedOpcode(f"LIS ED {op2:02X}")
+            raise UnsupportedOpcode(
+                f"LIS ED {op2:02X} (suffixed memory op: targets MBASE page on "
+                f"hardware, not a 24-bit address — do not emit)")
         if op == 0x19: a.hl = a._lo16_add(a.hl, a.de); return
         if op == 0x09: a.hl = a._lo16_add(a.hl, a.bc); return
         if op == 0x29: a.hl = a._lo16_add(a.hl, a.hl); return
         if op == 0x39: a.hl = a._lo16_add(a.hl, a.sp); return
-        if op == 0x2A: a.hl = (a.hl & 0xFF0000) | a.r16(a.fetch24()); return
-        if op == 0x22: a.w16(a.fetch24(), a.hl); return
-        if op == 0x23: a.hl = (a.hl & 0xFF0000) | ((a.hl + 1) & 0xFFFF); return
-        if op == 0x13: a.de = (a.de & 0xFF0000) | ((a.de + 1) & 0xFFFF); return
-        if op == 0x03: a.bc = (a.bc & 0xFF0000) | ((a.bc + 1) & 0xFFFF); return
-        if op == 0x2B: a.hl = (a.hl & 0xFF0000) | ((a.hl - 1) & 0xFFFF); return
-        if op == 0x0B: a.bc = (a.bc & 0xFF0000) | ((a.bc - 1) & 0xFFFF); return
-        if op == 0xE5: a._push16(a.hl); return
-        if op == 0xD5: a._push16(a.de); return
-        if op == 0xC5: a._push16(a.bc); return
-        if op == 0xE1: a.hl = (a.hl & 0xFF0000) | a._pop16(); return
-        if op == 0xD1: a.de = (a.de & 0xFF0000) | a._pop16(); return
-        if op == 0xC1: a.bc = (a.bc & 0xFF0000) | a._pop16(); return
-        if op == 0xEB: a.hl, a.de = a.de, a.hl; return
-        raise UnsupportedOpcode(f"LIS {op:02X}")
+        if op == 0x23: a.hl = (a.hl + 1) & 0xFFFF; return
+        if op == 0x13: a.de = (a.de + 1) & 0xFFFF; return
+        if op == 0x03: a.bc = (a.bc + 1) & 0xFFFF; return
+        if op == 0x2B: a.hl = (a.hl - 1) & 0xFFFF; return
+        if op == 0x0B: a.bc = (a.bc - 1) & 0xFFFF; return
+        if op == 0xEB:                                      # EX DE,HL (16)
+            a.hl, a.de = a.de & 0xFFFF, a.hl & 0xFFFF; return
+        raise UnsupportedOpcode(
+            f"LIS {op:02X} (suffixed memory/stack ops use MBASE/SPS on "
+            f"hardware — do not emit)")
 
     def _lo16_add(self, reg, val):
         r = (reg & 0xFFFF) + (val & 0xFFFF)
         self.fc = r > 0xFFFF
-        return (reg & 0xFF0000) | (r & 0xFFFF)
+        return r & 0xFFFF
 
     def _lo16_sbc(self, reg, val):
         r = (reg & 0xFFFF) - (val & 0xFFFF) - (1 if self.fc else 0)
         self.fc = r < 0
         res = r & 0xFFFF
         self.fz = (res == 0)
-        return (reg & 0xFF0000) | res
+        return res
 
-    def _push16(self, v):
-        self.sp = (self.sp - 2) & MASK24
-        self.w16(self.sp, v)
-
-    def _pop16(self):
-        v = self.r16(self.sp)
-        self.sp = (self.sp + 2) & MASK24
-        return v
-
-    # --- .SIS prefix (16-bit immediate loads) ---
+    # --- .SIS prefix (16-bit immediate loads; upper byte zeroed per CEmu) ---
     def _sis(self):
         op = self.fetch8()
         a = self
-        if op == 0x21: a.hl = (a.hl & 0xFF0000) | a.fetch16(); return
-        if op == 0x11: a.de = (a.de & 0xFF0000) | a.fetch16(); return
-        if op == 0x01: a.bc = (a.bc & 0xFF0000) | a.fetch16(); return
+        if op == 0x21: a.hl = a.fetch16(); return
+        if op == 0x11: a.de = a.fetch16(); return
+        if op == 0x01: a.bc = a.fetch16(); return
         raise UnsupportedOpcode(f"SIS {op:02X}")
 
 

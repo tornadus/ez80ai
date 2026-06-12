@@ -8,19 +8,33 @@ Self-contained builder for generating Ti-84 Plus CE machine code with:
 - IY save/restore for TI-OS compatibility
 - Label/fixup system for forward references
 
-IMPORTANT eZ80 ADL mode caveats discovered during development:
+IMPORTANT eZ80 ADL mode caveats (audited against CEmu — see CAVEAT_AUDIT.md):
   1. Suffix prefix bytes: 0x40=.SIS, 0x49=.SIL, 0x52=.LIS, 0x5B=.LIL
-     Many online sources have 0x49 and 0x52 SWAPPED. Verified via CEmu source.
-  2. .LIS ED-prefixed STORE instructions (ED 43, ED 53) may corrupt adjacent
-     memory on real hardware. Use 8-bit stores (LD A,reg; LD (nn),A) instead.
-  3. Flags from .LIS SBC are unreliable for signed comparisons -- the sign flag
-     may reflect the 24-bit register state, not the 16-bit result. Use 8-bit
-     comparison routines instead.
+     Many online sources have 0x49 and 0x52 SWAPPED. Verified via CEmu source
+     (cpu.c suffix decode: L = opcode bit 0, IL = opcode bit 1).
+  2. Suffixed (.SIS/.LIS) instructions that touch MEMORY or the STACK are
+     unusable in an ADL program: the CPU executes them in Z80 mode, so data
+     accesses go to {MBASE, addr16} (NOT the 24-bit label address — on TI-OS
+     that is 0xD0xxxx, i.e. wrong reads and OS-RAM-corrupting writes) and
+     pushes/pops use the Z80 SPS stack. The historical "ED 43/ED 53 stores
+     corrupt adjacent memory" caveat was this, misdiagnosed; non-ED suffixed
+     memory forms and suffixed LOADS are equally broken. These emitters have
+     been REMOVED; ez80interp rejects the opcodes. Register-only suffixed ops
+     (ADD/SBC HL,rr / INC/DEC rr / EX DE,HL / immediate loads) are fully safe.
+  3. Flags from .LIS SBC are CORRECT for the 16-bit result per CEmu (S = bit
+     15, PV = 16-bit overflow). The old "sign flag may reflect bit 23" claim
+     is wrong; the real pitfall is that an S-only signed compare is overflow-
+     blind (needs S xor PV, i.e. JP PE/PO). The 8-bit XOR-sign-bits compare
+     used by ARGMAX is a correct overflow-safe alternative and stays.
   4. 8-bit register loads (LD H,n / LD C,A / etc.) do NOT clear the upper byte
      of the 24-bit register pair. Always use LD rr,0 (24-bit) before setting
      individual registers if the pair will be used for pointer arithmetic.
+     (Per CEmu, suffixed 16-bit PAIR writes — .SIS LD HL,nn etc. — DO zero
+     bits 16-23; Zilog documents the upper byte as undefined, so do not RELY
+     on either behavior.)
   5. TI-OS uses IY as flags base pointer (0xD00080). Save IY before computation
-     and restore before any TI-OS syscall (_PutC, _NewLine, etc.).
+     and restore before any TI-OS syscall (_PutC, _NewLine, etc.). This is an
+     OS ABI contract, not a CPU caveat.
 """
 
 from typing import List, Dict, Tuple
@@ -205,19 +219,20 @@ class eZ80Builder:
 
     def ld_hl_mem_label(self, label): self.emit(0x2A); self.fixup_word(label)
     def ld_mem_label_hl(self, label): self.emit(0x22); self.fixup_word(label)
-    # WARNING: the DE/BC stores below emit ED 53 / ED 43, which can corrupt
-    # adjacent memory on real hardware (caveat #2). For pointers, move the value
-    # into HL (e.g. ex_de_hl) and use the safe ld_mem_label_hl (0x22) instead.
+    # NOTE: the unsuffixed ED 53 / ED 43 stores below are plain ADL-mode
+    # 24-bit stores (3 bytes at the 24-bit address) — correct per CEmu. The
+    # historical "may corrupt adjacent memory" worry was a misdiagnosis of
+    # the SUFFIXED (.LIS) forms (see caveat #2). The codegen still routes
+    # pointer stores through ld_mem_label_hl by convention.
     def ld_mem_label_de(self, label): self.emit(0xED, 0x53); self.fixup_word(label)
     def ld_mem_label_bc(self, label): self.emit(0xED, 0x43); self.fixup_word(label)
     def ld_bc_mem_label(self, label): self.emit(0xED, 0x4B); self.fixup_word(label)
+    def ld_de_mem_label(self, label): self.emit(0xED, 0x5B); self.fixup_word(label)
     def ld_mem_label_sp(self, label): self.emit(0xED, 0x73); self.fixup_word(label)
     def ld_sp_mem_label(self, label): self.emit(0xED, 0x7B); self.fixup_word(label)
     def ld_a_mem_label(self, label): self.emit(0x3A); self.fixup_word(label)
     def ld_mem_label_a(self, label): self.emit(0x32); self.fixup_word(label)
-    # IX absolute load/store (DD 2A / DD 22): same non-ED encodings as the HL
-    # forms (and the FD 2A/22 IY forms used for SAVED_IY), so they are safe on
-    # real hardware -- caveat #2 only concerns ED-prefixed .LIS stores.
+    # IX absolute load/store (DD 2A / DD 22), 24-bit.
     def ld_ix_mem_label(self, label): self.emit(0xDD, 0x2A); self.fixup_word(label)
     def ld_mem_label_ix(self, label): self.emit(0xDD, 0x22); self.fixup_word(label)
 
@@ -429,20 +444,24 @@ class eZ80Builder:
             self.emit(ord(c))
 
     # ================================================================
-    # .LIS prefixed instructions (24-bit addr, 16-bit register)
-    # Used for signed 16-bit math in the inference core.
+    # .LIS / .SIS prefixed instructions — REGISTER-ONLY forms.
+    # Used for 16-bit math in the inference core.
     #
-    # WARNING: .LIS ED-prefixed STORES (ld_mem_label_bc_16, ld_mem_label_de_16)
-    # are unreliable on real hardware -- they may corrupt adjacent memory.
-    # Use 8-bit LD A,reg; LD (nn),A stores instead. The methods are kept here
-    # for reference but should NOT be used for stores. Loads appear to be safe.
+    # Per CEmu (see caveat #2 in the header / CAVEAT_AUDIT.md), every
+    # suffixed instruction that touches memory or the stack executes in
+    # Z80 mode: data addresses become {MBASE, addr16} and pushes/pops use
+    # the SPS stack. Those forms can never address program data in an ADL
+    # program and were REMOVED from this builder; ez80interp rejects their
+    # opcodes. Only register-register/immediate suffixed ops remain.
     #
-    # WARNING: Flags from .LIS SBC are unreliable for signed comparison.
-    # The sign flag may reflect bit 23 (24-bit) instead of bit 15 (16-bit).
-    # Use 8-bit XOR-sign-bits comparison instead.
+    # Values written by these ops are masked to 16 bits and ZERO the
+    # pair's bits 16-23 (CEmu cpu_write_rp); do not rely on either the old
+    # "preserved upper byte" model or the zeroing (Zilog: undefined).
+    # Flags: C/Z/S/PV all reflect the 16-bit result (S-only signed
+    # compares are overflow-blind on any CPU; see caveat #3).
     # ================================================================
 
-    # 16-bit register pair arithmetic (safe -- values correct, flags unreliable)
+    # 16-bit register pair arithmetic
     def add_hl_de_16(self): self.emit(self.LIS, 0x19)
     def add_hl_bc_16(self): self.emit(self.LIS, 0x09)
     def add_hl_hl_16(self): self.emit(self.LIS, 0x29)
@@ -450,32 +469,7 @@ class eZ80Builder:
     def sbc_hl_de_16(self): self.emit(self.LIS, 0xED, 0x52)
     def sbc_hl_bc_16(self): self.emit(self.LIS, 0xED, 0x42)
 
-    # 16-bit memory load/store (non-ED opcodes -- safe)
-    def ld_hl_mem_label_16(self, label):
-        self.emit(self.LIS, 0x2A); self.fixup_word(label)
-
-    def ld_mem_label_hl_16(self, label):
-        self.emit(self.LIS, 0x22); self.fixup_word(label)
-
-    # 16-bit memory load/store (ED-prefixed -- LOADS safe, STORES unreliable)
-    def ld_mem_label_de_16(self, label):
-        """UNRELIABLE on hardware -- may corrupt adjacent memory. Use 8-bit stores."""
-        self.emit(self.LIS, 0xED, 0x53); self.fixup_word(label)
-
-    def ld_de_mem_label_16(self, label):
-        self.emit(self.LIS, 0xED, 0x5B); self.fixup_word(label)
-
-    def ld_mem_label_bc_16(self, label):
-        """UNRELIABLE on hardware -- may corrupt adjacent memory. Use 8-bit stores."""
-        self.emit(self.LIS, 0xED, 0x43); self.fixup_word(label)
-
-    def ld_bc_mem_label_16(self, label):
-        self.emit(self.LIS, 0xED, 0x4B); self.fixup_word(label)
-
-    # ================================================================
-    # .SIS prefixed instructions (16-bit addr, 16-bit register)
-    # ================================================================
-
+    # 16-bit immediate loads (.SIS: 2-byte immediate, register-only)
     def ld_hl_nn_16(self, val): self.emit(self.SIS, 0x21); self.emit_word(val)
     def ld_de_nn_16(self, val): self.emit(self.SIS, 0x11); self.emit_word(val)
     def ld_bc_nn_16(self, val): self.emit(self.SIS, 0x01); self.emit_word(val)
@@ -487,16 +481,7 @@ class eZ80Builder:
     def dec_hl_16(self): self.emit(self.LIS, 0x2B)
     def dec_bc_16(self): self.emit(self.LIS, 0x0B)
 
-    # 16-bit push/pop
-    def push_hl_16(self): self.emit(self.LIS, 0xE5)
-    def push_de_16(self): self.emit(self.LIS, 0xD5)
-    def push_bc_16(self): self.emit(self.LIS, 0xC5)
-    def pop_hl_16(self): self.emit(self.LIS, 0xE1)
-    def pop_de_16(self): self.emit(self.LIS, 0xD1)
-    def pop_bc_16(self): self.emit(self.LIS, 0xC1)
-
-    # 16-bit block transfer and exchange
-    def ldir_16(self): self.emit(self.LIS, 0xED, 0xB0)
+    # 16-bit exchange (register-only)
     def ex_de_hl_16(self): self.emit(self.LIS, 0xEB)
 
     # ================================================================
