@@ -21,8 +21,8 @@ cpu_write_rp (cpu.c:322-331), which masks the value to the mode width and
 assigns the full register. Suffixed MEMORY/stack ops are not supported at all:
 on the real CPU (CEmu cpu_address_mode, cpu.c:71-76) they access
 {MBASE, addr16} and the Z80 SPS stack, never a 24-bit label address, so the
-codegen must not emit them — any attempt fails loudly here. See
-CAVEAT_AUDIT.md.
+codegen must not emit them — any attempt fails loudly here. See the audited
+caveat list in the libez80.py module header.
 """
 
 
