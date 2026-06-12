@@ -29,15 +29,22 @@ build them yourself:
 ```bash
 pip install -r requirements.txt
 python3 prepare_data.py                 # downloads nq_open, writes training_data.txt
-python3 train.py -f training_data.txt --epochs 300 --save-best   # -> neochat_model.pt
+python3 train.py -f training_data.txt --epochs 900 --save-best --quant-target 300
+                                         # -> neochat_model.pt (~50 min on an Arc Pro B50)
 python3 exportmodel.py                   # neochat_model.pt -> model.npz
-python3 buildchat84.py --model model.npz # -> bin/NEOCHAT.8xp + NEOA-D.8xv
+python3 buildchat84.py --model model.npz # -> bin/NEOCHAT.8xp + NEOA-V.8xv
 python3 test_model.py                    # sanity checks on the trained model
 python3 test_faithfulness.py             # asserts the eZ80 build mirrors the Python sim
 ```
 
 `buildchat84.py` and `exportmodel.py` only need NumPy; training/chat/eval need
 PyTorch (see `requirements.txt` for the Intel Arc / XPU note).
+
+The training schedule is 900 epochs with the quantization ramp ending at epoch
+300 (`--quant-target 300`) — the remaining 600 epochs fine-tune at full
+quantization, which measured ~+0.04 IntAcc over stopping at the ramp. Training
+is unseeded and run-to-run spread is real (~0.05 IntAcc): train a few
+candidates and keep the best one.
 
 ### What to Expect
 A charming little chatbot that gives surprisingly coherent (but factually incorrect) responses.

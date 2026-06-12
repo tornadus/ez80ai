@@ -11,9 +11,9 @@ Build Ti-84 Plus CE .8xp binary:
 python3 buildchat84.py --model model.npz
 ```
 
-Train a model:
+Train a model (900 epochs, quantization ramp ends at 300, then full-quant fine-tune; unseeded — train several, keep the best by IntAcc):
 ```bash
-python3 train.py -f labeled_data.txt --epochs 300 --save-best --chat
+python3 train.py -f training_data.txt --epochs 900 --save-best --quant-target 300
 ```
 
 Export PyTorch model to .npz:
