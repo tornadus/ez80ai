@@ -13,13 +13,12 @@ If you like this project, please show some appreciation for those two as well. T
 ### Get Started
 Binaries can be found in the releases. Inside the archive you'll find:
 - **NEOCHAT.8XP**: The engine. This is what you run to actually start chatting.
-- **NEOA-D.8XV**: These are the model weights. They're too large to be stored within the executable, so they're APPVARs instead.
+- **NEOA-D.8XV**: These are the model weights. They're too large to be stored within the executable, so they're APPVARs instead. They live in **archived flash** and are read in place — they never take up your RAM.
 
-I highly recommend that you have ample flash (a few MB) and RAM (at least 150kb) available.
+I highly recommend that you have ample flash (~1.5 MB) available. RAM needs are tiny (the program itself is a few KB).
 
 If your calculator is on OS 5.5 or later, you'll need to jailbreak it before running this program.
-> **Important:** If you archive the APPVARs, they'll be unarchived when you start the program.
-> When you (gracefully) close it, re-archiving will be attempted. If your flash is low, you may get a prompt asking for "Garbage Collection". **Always say yes**, this is just TI-OS wanting to defragment your flash before archiving the weights again.
+> **Important:** The weight APPVARs are meant to stay archived; the transfer should put them in the archive automatically. If one ends up in RAM, the program archives it on startup — if your flash is fragmented you may get a prompt asking for "Garbage Collection". **Always say yes**, this is just TI-OS defragmenting your flash before archiving the weights.
 
 
 ### Building from source

@@ -44,6 +44,13 @@ TI_Arc_Unarc = 0x021448      # Toggle archive status of variable in OP1
 # AppVar type ID
 APPVAR_TYPE = 0x15            # TI AppVar variable type
 
+# Per-AppVar magic header (8 bytes: 6-byte signature + version + index). Each
+# weight blob starts with this; the loader verifies it after computing the
+# in-place archived-flash data pointer. A wrong pointer (e.g. a bad header
+# offset) shows up as an explicit MAG error screen instead of silent gibberish.
+WEIGHT_MAGIC_SIG = b'NEOWGT'
+WEIGHT_FMT_VERSION = 1
+
 # AppVar names for weight data (8 chars max, padded with 0)
 APPVAR_NAMES = ['NEOA', 'NEOB', 'NEOC', 'NEOD']
 
@@ -212,7 +219,10 @@ def build_8xv(data: bytes, name: str) -> bytes:
     data_section.append(APPVAR_TYPE)                      # Type: AppVar
     data_section.extend(name.encode('ascii').ljust(8, b'\x00'))
     data_section.append(0x00)                              # Version
-    data_section.append(0x00)                              # Flag: in RAM
+    data_section.append(0x80)                              # Flag: archived -- transfer
+                                                           # software sends the var
+                                                           # straight to flash, where
+                                                           # inference reads it in place
     data_section.extend(struct.pack('<H', var_data_len))
     data_section.extend(var_data)
 
@@ -300,10 +310,12 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
     # Replaces the old hardcoded NEOA-D + manual layer-2 split. Each layer is
     # split into output-neuron ranges ("shards") small enough to fit an AppVar,
     # then shards are greedily packed into AppVars (<= MAX_APPVAR_BYTES each).
-    # For the baseline [512,512,256] arch this reproduces the exact NEOA-D blobs
-    # byte-for-byte (greedy + the same layer-2 split); for any other arch it just
-    # works. Output-neuron split points are byte-aligned because every input dim
-    # is a multiple of 4 under 2-bit packing (asserted below).
+    # Every AppVar blob starts with an 8-byte magic header (see av_magic) that
+    # the on-calc loader verifies after computing the in-place flash pointer --
+    # the loader path is invisible to the faithfulness gate, so this is the one
+    # runtime check that the archived-header offset math is right. Output-neuron
+    # split points are byte-aligned because every input dim is a multiple of 4
+    # under 2-bit packing (asserted below).
     spec = load_spec_from_model(model_path)
     shifts = spec['inter_layer_shift']
     wbits = spec['weight_bits']               # per-layer weight bit-width
@@ -340,6 +352,11 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
         return 'NEO' + (chr(65 + i) if i < 26
                         else chr(65 + i // 26 - 1) + chr(65 + i % 26))
 
+    def av_magic(i):
+        """8-byte per-AppVar magic: signature + format version + appvar index.
+        The index byte makes a swapped/renamed AppVar fail loudly too."""
+        return WEIGHT_MAGIC_SIG + bytes([WEIGHT_FMT_VERSION, i])
+
     # Per-layer shard ranges; split any layer whose packed weights+bias exceed
     # one AppVar. The output layer carries TWO bias sets (rest + start).
     layer_plan = []
@@ -351,7 +368,9 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
         is_out = (li == num_layers - 1)
         bias_sets = 2 if (is_out and has_dual_bias) else 1
         layer_bytes = (n_out * n_in * wbits[li]) // 8 + n_out * 2 * bias_sets
-        nsplit = max(1, -(-layer_bytes // MAX_AV))
+        # Reserve 8 bytes per AppVar for the magic header so a shard that lands
+        # alone in a fresh AppVar still fits.
+        nsplit = max(1, -(-layer_bytes // (MAX_AV - 8)))
         base, rem, lo, ranges = n_out // nsplit, n_out % nsplit, 0, []
         for k in range(nsplit):
             sz = base + (1 if k < rem else 0)
@@ -374,12 +393,13 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
         return wb, pack_bias_bytes(params[f'{name}_bias'][lo:hi]), None
 
     appvar_blobs = {}
-    av_idx, cur = 0, bytearray()
+    av_idx, cur = 0, bytearray(av_magic(0))
     for (li, lo, hi) in flat_shards:
         wb, b1, b2 = shard_blobs(li, lo, hi)
         sz = len(wb) + len(b1) + (len(b2) if b2 is not None else 0)
-        if len(cur) > 0 and len(cur) + sz > MAX_AV:
-            appvar_blobs[av_name(av_idx)] = bytes(cur); av_idx += 1; cur = bytearray()
+        if len(cur) > 8 and len(cur) + sz > MAX_AV:
+            appvar_blobs[av_name(av_idx)] = bytes(cur)
+            av_idx += 1; cur = bytearray(av_magic(av_idx))
         w_off = len(cur); cur += wb
         b_off = len(cur); cur += b1
         bs_off = None
@@ -425,8 +445,16 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
     # Turn off run indicator
     b.call_addr(TI_RunIndicOff)
 
-    # === Load AppVars ===
+    # === Load AppVars (flash-resident) ===
+    # Weights are read IN PLACE from archived flash (measured cost <= ~2% of
+    # inference time on all hardware revisions). A var found in RAM is archived
+    # one-way -- weights must end up in flash so the freed RAM stays free.
     for i, _nm in enumerate(av_names):
+        # ChkFindSym pointer -> data start for an ARCHIVED var: the flash copy
+        # of the VAT entry precedes the data. Offset hardware-confirmed by the
+        # benchflash84 magic scan: 9 + 1 (name-length byte) + name_len + 2
+        # (size word). Name length is known at build time, so it's a constant.
+        hdr = 9 + 1 + len(_nm) + 2
         b.ld_hl_label(f'AVNAME{i}')
         b.call_addr(TI_Mov9ToOP1)
         b.call_addr(TI_ChkFindSym)
@@ -434,35 +462,46 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
         # Decide RAM vs archived by WHERE ChkFindSym's data pointer (DE) points,
         # not by the archive-flag register (A/B), which proved unreliable on real
         # hardware. RAM is >= 0xD00000; archived vars live in flash (< 0xD00000).
-        # Testing the pointer also means we never Arc_Unarc a var that's already
-        # in RAM, so the calc's archive layout is left exactly as we found it.
         b.ex_de_hl()                  # HL = data pointer
         b.ld_mem_label_hl('AVTMP')    # stash all 3 bytes
         b.ex_de_hl()                  # restore DE = data pointer
         b.ld_a_mem_label('AVTMP_HI')  # A = high byte of the pointer
         b.cp_n(0xD0)
-        b.jr_nc(f'AV_RAM{i}')         # high byte >= 0xD0 -> already in RAM, use as-is
+        b.jr_c(f'AV_FLASH{i}')        # < 0xD0 -> already archived, read in place
 
-        # Archived (pointer in flash) -- unarchive it, then re-find
+        # In RAM -- archive it (one-way), then re-find. Arc_Unarc and ChkFindSym
+        # clobber OP1, so the name is re-set before every syscall. Archiving may
+        # raise a one-time "Garbage Collect?" prompt (OS-handled).
         b.ld_hl_label(f'AVNAME{i}')
         b.call_addr(TI_Mov9ToOP1)
         b.call_addr(TI_Arc_Unarc)
-        b.ld_a_n(1)
-        b.ld_mem_label_a(f'AVARCED{i}')
         b.ld_hl_label(f'AVNAME{i}')
         b.call_addr(TI_Mov9ToOP1)
         b.call_addr(TI_ChkFindSym)
         b.jp_c('AV_ERR')
-
-        b.label(f'AV_RAM{i}')
-        b.inc_de()
-        b.inc_de()                    # Skip 2-byte size header
-        # Store the AppVar weight-data pointer. ED-53 (LD (nn),DE) can corrupt
-        # adjacent memory on real hardware (libez80 caveat #2), so move the
-        # pointer into HL and use the safe LD (nn),HL (0x22) instead. DE/HL are
-        # not needed afterwards (the loop re-finds each AppVar).
+        b.ex_de_hl()                  # re-stash: the pre-archive pointer is stale
+        b.ld_mem_label_hl('AVTMP')
         b.ex_de_hl()
+        b.ld_a_mem_label('AVTMP_HI')
+        b.cp_n(0xD0)
+        b.jr_c(f'AV_FLASH{i}')
+        b.jp('AV_ERR')                # still in RAM -> archiving failed
+
+        b.label(f'AV_FLASH{i}')
+        # AVPTR{i} = ChkFindSym pointer + archived-header size. 24-bit add --
+        # flash addresses are ~0x3B0000, well outside 16-bit range.
+        # Store via HL: ED-53 (LD (nn),DE) can corrupt adjacent memory on real
+        # hardware (libez80 caveat #2), so use the safe LD (nn),HL (0x22).
+        b.ex_de_hl()
+        b.ld_de_nn(hdr)
+        b.add_hl_de()
         b.ld_mem_label_hl(f'AVPTR{i}')
+        # Magic guard: the 8 bytes at the computed pointer must match this
+        # AppVar's expected header. The loader is invisible to the faithfulness
+        # gate, so this is the one runtime check of the pointer math.
+        b.ld_de_label(f'MAGIC{i}')
+        b.call('CMP8')
+        b.jp_nz('AV_MAGERR')
 
     b.jr('AV_OK')
 
@@ -476,6 +515,35 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
     b.ld_a_n(ord('R'))
     b.call_addr(TI_PutC)
     b.call_addr(TI_RunIndicOn)
+    b.ret()
+
+    # Magic mismatch at the computed flash pointer: the archived-header offset
+    # math is wrong, or the AppVar is stale/corrupt. Distinct from AV_ERR so the
+    # two failure modes are tellable apart on-device.
+    b.label('AV_MAGERR')
+    b.call_addr(TI_ClrScrn)
+    b.call_addr(TI_HomeUp)
+    b.ld_a_n(ord('M'))
+    b.call_addr(TI_PutC)
+    b.ld_a_n(ord('A'))
+    b.call_addr(TI_PutC)
+    b.ld_a_n(ord('G'))
+    b.call_addr(TI_PutC)
+    b.call_addr(TI_RunIndicOn)
+    b.ret()
+
+    # CMP8: Z iff the 8 bytes at (HL) equal the 8 bytes at (DE).
+    # Caller preloads DE with the expected bytes. Clobbers A/B/DE/HL (fine: the
+    # loader loop re-finds each AppVar from scratch).
+    b.label('CMP8')
+    b.ld_b_n(8)
+    b.label('CMP8_LOOP')
+    b.ld_a_de()
+    b.cp_hl()
+    b.ret_nz()
+    b.inc_hl()
+    b.inc_de()
+    b.djnz('CMP8_LOOP')
     b.ret()
 
     b.label('AV_OK')
@@ -555,16 +623,9 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
     b.jp('CHAT_LOOP')
 
     b.label('CHAT_EXIT')
-    # Re-archive any AppVars we unarchived at startup
+    # Weights stay archived (read in place from flash) -- nothing to restore
+    # beyond IY for the syscalls below.
     b.ld_iy_mem_label('SAVED_IY')
-    for i, _nm in enumerate(av_names):
-        b.ld_a_mem_label(f'AVARCED{i}')
-        b.or_a()
-        b.jr_z(f'AV_NOARC{i}')
-        b.ld_hl_label(f'AVNAME{i}')
-        b.call_addr(TI_Mov9ToOP1)
-        b.call_addr(TI_Arc_Unarc)
-        b.label(f'AV_NOARC{i}')
     # Clean up
     b.call_addr(TI_ClrScrn)
     b.call_addr(TI_HomeUp)
@@ -1678,7 +1739,7 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
         b.call_addr(TI_ClrScrn)
         b.call_addr(TI_HomeUp)
 
-        # P0 (AVPTR0 runtime RAM address)
+        # P0 (AVPTR0 -- in-place flash address of the first weight AppVar)
         b.ld_a_n(ord('P'))
         b.call_addr(TI_PutC)
         b.ld_a_n(ord('0'))
@@ -1895,9 +1956,10 @@ def build_autoreg(model_path: str = 'model.npz', debug: bool = False):
         for c in name.ljust(8, '\x00'):
             b.db(ord(c))
 
-    # Archive tracking flags
+    # Expected per-AppVar magic headers (compared by CMP8 in the loader)
     for i in range(len(av_names)):
-        b.label(f'AVARCED{i}'); b.db(0)
+        b.label(f'MAGIC{i}')
+        b.db(*av_magic(i))
 
     # Debug-only scratch (emitted only when debug=True so production output is
     # byte-for-byte unchanged). 24-bit checksum slots use d3 (3-byte) so the
@@ -1994,17 +2056,17 @@ if __name__ == '__main__':
         print(f"AppVar {av_name}: {len(av_data):,} bytes")
     print(f"\nTotal weight data: {total_av:,} bytes ({total_av/1024:.1f} KB)")
 
-    # Hard gate: refuse to ship a model that won't fit the calculator's RAM.
+    # Hard gate: refuse to ship a model that won't fit the calculator.
     # Runs BEFORE writing ANY output file so an over-budget model fails loudly and
-    # cleanly (BudgetError) without leaving a half-written .8xp/.8xv behind. The
-    # working buffers (TOKBUF/BUF_A/...) are emitted into the program image via
-    # ds(), so len(b.code) already includes them — total_ram() must not add them
-    # again.
+    # cleanly (BudgetError) without leaving a half-written .8xp/.8xv behind.
+    # Weights live in archived flash and are read in place; only the program
+    # image (which embeds the working buffers via ds()) is RAM-resident.
     import sizes as _sizes
     _ram = _sizes.total_ram(len(b.code), total_av)
-    print(f"Runtime RAM: ~{_ram/1024:.1f} KB "
-          f"(program incl. buffers {len(b.code)/1024:.1f} + weights {total_av/1024:.1f}); "
+    print(f"Runtime RAM: ~{_ram/1024:.1f} KB (program incl. buffers); "
           f"budget {_sizes.RAM_BUDGET_BYTES/1024:.0f} KB")
+    print(f"Flash (archived weights): {total_av/1024:.1f} KB; "
+          f"budget {_sizes.FLASH_BUDGET_BYTES/1024:.0f} KB")
     _sizes.validate_or_raise({
         'program': len(b.code),
         'appvars': {n: len(d) for n, d in appvar_blobs.items()},

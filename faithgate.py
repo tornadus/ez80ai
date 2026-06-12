@@ -24,10 +24,15 @@ import intkernel
 from ez80interp import CPU
 from loadmodel import load_model_params, load_spec_from_model
 
-# Synthetic RAM layout for the interpreter (addresses only need self-consistency).
-BASE = 0xD00000
-SIZE = 0x200000           # 2 MB window: program (~0xD1A881) + weight AppVars
-AV_REGION = 0xE00000      # where we drop the AppVar payloads
+# Synthetic memory layout for the interpreter (addresses only need
+# self-consistency). AppVars are placed at a FLASH-RANGE address (< 0xD00000),
+# mirroring the device where weights are read in place from archive — so the
+# emitted compute code is verified against flash-typical pointers. BASE must be
+# 0: the interpreter indexes a flat bytearray as mem[addr - base], and a flash
+# address below a 0xD00000 base would index NEGATIVE (silent wrong reads).
+BASE = 0x000000
+SIZE = 0xE40000           # flat window: flash AVs (0x3B0000) + program (~0xD1A881) + stack
+AV_REGION = 0x3B0000      # where we drop the AppVar payloads (flash-range, like archive)
 
 
 def build_resolved(model_path, quiet=True):
@@ -51,8 +56,10 @@ def run_emitted(b, blobs, params, spec, query, context, genpos):
     mem[b.org - BASE: b.org - BASE + len(b.code)] = b.code
     cpu = CPU(mem, BASE, b.org)
 
-    # Drop AppVar payloads into RAM and point AVPTRn at them (the runtime loader
-    # is skipped — we set the pointers directly).
+    # Drop AppVar payloads at flash-range addresses and point AVPTRn at them
+    # (the runtime loader is skipped — we set the pointers directly). AVPTR
+    # points at the blob start, i.e. AT the 8-byte magic header; every shard
+    # offset already includes it, matching the device loader.
     addr = AV_REGION
     for i, name in enumerate(meta['appvar_names']):
         payload = blobs[name]

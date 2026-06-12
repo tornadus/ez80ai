@@ -7,46 +7,36 @@ buildchat84.py (so the build fails loudly when over budget) and by the
 experiment harness ez80research/evaluate.py (so the agentic loop rejects
 infeasible models). Keep this file pure and dependency-free.
 
-What actually constrains a model (corrected — do NOT assume 1 layer = 1 AppVar):
+What actually constrains a model (flash-resident weights, 2026-06):
 
-  * RAM is the binding constraint. The README has you free >=150 KB of RAM, and
-    archived AppVars are UNARCHIVED INTO RAM when the program starts. So at
-    runtime the program code + ALL packed weight data + the working buffers must
-    coexist in RAM. That total, not flash, is the ceiling. (Flash only needs to
-    hold the AppVars while archived, and the calc has a few MB of it.)
+  * WEIGHTS LIVE IN ARCHIVED FLASH and are read in place by the inference code
+    (measured cost <= ~2% of inference time on all hardware revisions). The
+    binding constraint on model size is therefore the FLASH budget — the free
+    user archive we can reasonably expect on a calculator that has a few other
+    things installed.
+
+  * RAM holds only the program image (code + the ds() working buffers). That is
+    ~10-15 KB and sits far below the 141 KB RAM budget; the RAM gate is kept as
+    a backstop against a pathological program-size regression.
 
   * Per-AppVar size is a .8xv FORMAT limit, not a model limit. Each AppVar
     payload is length-prefixed with a uint16, so <= 65535 bytes. A layer's
     weights can be split across AS MANY AppVars as needed to respect this — the
-    number of AppVars is a build-layout detail, not a hardware cap. (The current
-    buildchat84.py happens to emit a fixed NEOA-D layout, but that is the build's
-    choice; it is not what bounds feasibility.)
-
-  * AppVar COUNT is therefore not separately gated: with a <=150 KB RAM ceiling
-    and <=65535 B per AppVar, a feasible model has at most ~2-3 AppVars anyway,
-    so RAM binds first.
-
-NOTE on a possible future lever: if the inference code is changed to read
-weights directly from ARCHIVED AppVars in flash (rather than relying on the OS
-unarchiving them to RAM), the binding budget becomes flash (megabytes) instead
-of RAM, dramatically enlarging the feasible model space. That is not how the
-build works today, so we gate on RAM.
+    number of AppVars is a build-layout detail, not a hardware cap.
 """
 
-# Binding constraint: program + weights + buffers, all resident in RAM at run.
-#
-# CORRECTED 2026-06 against ON-DEVICE binary search. The Ti-84 Plus CE has ~154 KB
-# user RAM TOTAL, but the TI-OS needs a chunk left FREE to launch+run a program.
-# Measured on hardware (filler-AppVar binary search): NEOCHAT RAN with 5,553 B free
-# and FAILED with 5,027 B free -> the OS minimum free-to-run is ~5.0-5.5 KB. (The
-# previous release's 9.6 KB free was just comfortably above it; the current build's
-# 4,768 B was below it.) So the gate is set to leave a SAFE margin above that
-# threshold. Anchor: the current build is 146,820 B accounting @ 4,768 B free, so
-# this accounting metric maps to free RAM as  free ~= 151,588 - accounting. A budget
-# of 141 KB (144,384) => an at-budget model leaves ~7.2 KB free (~1.7 KB over the
-# ~5.5 KB cliff); our shipped model sits a bit under that (~8 KB free). Go higher
-# only if you've freed the calc of other vars; lower for more robustness.
-RAM_BUDGET_BYTES = 141 * 1024     # leaves >=~7 KB free (OS cliff measured at ~5.0-5.5 KB)
+# RAM constraint: only the program image (code + ds() buffers) is RAM-resident
+# now that weights are read in place from flash. The 141 KB figure was
+# calibrated ON-DEVICE in the unarchive-to-RAM era (filler-AppVar binary
+# search: the OS minimum free-to-run is ~5.0-5.5 KB; 141 KB of accounting
+# leaves ~7.2 KB free). It predates flash-resident weights but remains a valid
+# ceiling for the program image, which sits an order of magnitude below it.
+RAM_BUDGET_BYTES = 141 * 1024     # program image only; OS free-to-run cliff ~5.0-5.5 KB
+
+# Flash constraint: the archived weight AppVars. A CE with the pre-installed
+# apps and nothing else has roughly 1.8 MB of free archive; gate at 1.5 MB so
+# users can run the program even with a few other things on the calculator.
+FLASH_BUDGET_BYTES = 1_500_000
 
 # .8xv payload hard limit. The on-disk var entry length-prefixes the payload with
 # a uint16 TWICE (build_8xv: var_data = u16(len) + payload, then the entry stores
@@ -55,7 +45,7 @@ RAM_BUDGET_BYTES = 141 * 1024     # leaves >=~7 KB free (OS cliff measured at ~5
 # to respect this; it is NOT a per-layer feasibility limit.
 MAX_APPVAR_BYTES = 65533
 
-# Fixed RAM consumers besides the packed weights.
+# Fixed RAM consumers (the program image's working buffers).
 RUNTIME_BUFFER_BYTES = 3 * 1024   # TOKBUF/BUF_A/BUF_B/OUTBUF working buffers
 # Program CODE estimate (logic only — the pregate adds the ds() working buffers
 # separately). The real emitted code (sans buffers) is ~2.0-2.5 KB; the old 8 KB
@@ -66,7 +56,7 @@ PROGRAM_ESTIMATE_BYTES = 2500      # program code (logic), arch-only pre-gate on
 
 
 class BudgetError(Exception):
-    """Raised when a built model exceeds the calculator RAM budget."""
+    """Raised when a built model exceeds a calculator memory budget."""
 
 
 def weight_data_bytes(arch, weight_bits=2):
@@ -89,41 +79,44 @@ def weight_data_bytes(arch, weight_bits=2):
             'dual_bias': dual_bias, 'total': weights + bias + dual_bias}
 
 
-def total_ram(program_bytes, weight_total_bytes):
-    """Bytes that must be resident in RAM at runtime: the program image plus all
-    packed weight data. The working buffers (TOKBUF/BUF_A/BUF_B/OUTBUF) are
-    emitted INTO the program image via ds(), so when `program_bytes` is the real
-    build size (len(b.code)) it already includes them — do NOT add them again.
-    The arch-only pre-gate (estimate_memory) folds a buffer allowance into its
-    program ESTIMATE instead, since that estimate does not include the ds bytes."""
-    return program_bytes + weight_total_bytes
+def total_ram(program_bytes, weight_total_bytes=0):
+    """Bytes that must be resident in RAM at runtime: the program image only.
+    Weights live in archived flash and are read in place, so they no longer
+    count against RAM (`weight_total_bytes` is accepted for caller
+    compatibility and ignored — gate it against FLASH_BUDGET_BYTES instead).
+    The working buffers (TOKBUF/PING/PONG/OUTBUF) are emitted INTO the program
+    image via ds(), so when `program_bytes` is the real build size
+    (len(b.code)) it already includes them — do NOT add them again."""
+    return program_bytes
 
 
 def estimate_memory(arch):
     """Fast arch-only pre-gate (no build needed). Returns components plus
     'total_ram', the minimum number of AppVars the weights would shard into, and
-    a 'fits' flag against the RAM budget. Uses a program-size ESTIMATE; the real
-    gate in check_budget() uses the build's actual program size."""
+    a 'fits' flag against the RAM (program) and flash (weights) budgets. Uses a
+    program-size ESTIMATE; the real gate in check_budget() uses the build's
+    actual program size."""
     w = weight_data_bytes(arch)
     # The program ESTIMATE doesn't include the ds() working buffers, so fold a
     # buffer allowance into it here (the real gate in check_budget() doesn't,
     # because the real program size already contains them).
-    ram = total_ram(PROGRAM_ESTIMATE_BYTES + RUNTIME_BUFFER_BYTES, w['total'])
+    ram = total_ram(PROGRAM_ESTIMATE_BYTES + RUNTIME_BUFFER_BYTES)
     return {
         **w,
         'weight_total': w['total'],
         'total_ram': ram,
         'min_appvars': -(-w['total'] // MAX_APPVAR_BYTES),  # ceil
-        'fits': ram <= RAM_BUDGET_BYTES,
+        'fits': ram <= RAM_BUDGET_BYTES and w['total'] <= FLASH_BUDGET_BYTES,
     }
 
 
 def pregate(spec):
-    """Fast spec-only RAM feasibility PRE-gate (no train, no build). Reject an
+    """Fast spec-only feasibility PRE-gate (no train, no build). Reject an
     infeasible model in <1s instead of after a full train+build. Bit-width-aware,
     and sizes the real ds() working buffers (TOKBUF + PING + PONG + OUTBUF) from
     the spec, plus a conservative program-code allowance. Deliberately slightly
     OVER-estimates so it never green-lights a model the real build gate rejects.
+    RAM gates the program image; flash gates the packed weights.
     Returns (fits, est_ram_bytes, reasons)."""
     arch = {'input_size': spec['input_size'],
             'hidden_sizes': spec['hidden_sizes'],
@@ -136,10 +129,12 @@ def pregate(spec):
                + 2 * max_hidden * 2             # PING + PONG
                + spec['num_classes'] * 2        # OUTBUF
                + 512)                           # INPBUF/CTX/scratch slack
-    est_ram = PROGRAM_ESTIMATE_BYTES + buffers + w['total']
+    est_ram = PROGRAM_ESTIMATE_BYTES + buffers
     reasons = []
     if est_ram > RAM_BUDGET_BYTES:
         reasons.append(f'PREGATE_RAM_OVER({est_ram}>{RAM_BUDGET_BYTES})')
+    if w['total'] > FLASH_BUDGET_BYTES:
+        reasons.append(f'PREGATE_FLASH_OVER({w["total"]}>{FLASH_BUDGET_BYTES})')
     return (len(reasons) == 0, est_ram, reasons)
 
 
@@ -150,9 +145,11 @@ def check_budget(sizes):
     payload bytes), 'appvars' ({name: bytes}). Returns (ok, reasons); empty
     reasons == OK.
 
-    Two independent failure modes:
-      * RAM_OVER       — program + weights + buffers exceed the RAM budget
-                         (the real feasibility limit).
+    Three independent failure modes:
+      * RAM_OVER       — the program image (code + buffers) exceeds the RAM
+                         budget (backstop; weights don't count, they're flash).
+      * FLASH_OVER     — total packed weight data exceeds the flash budget
+                         (the real feasibility limit on model size).
       * APPVAR_TOO_BIG — the build emitted an AppVar above the .8xv 65535-byte
                          format limit. This means the build's SPLITTER is
                          incomplete for this model, not that the model is
@@ -161,9 +158,13 @@ def check_budget(sizes):
     """
     reasons = []
 
-    ram = total_ram(sizes.get('program', 0), sizes.get('total_weight', 0))
+    ram = total_ram(sizes.get('program', 0))
     if ram > RAM_BUDGET_BYTES:
         reasons.append(f'RAM_OVER({ram}>{RAM_BUDGET_BYTES})')
+
+    flash = sizes.get('total_weight', 0)
+    if flash > FLASH_BUDGET_BYTES:
+        reasons.append(f'FLASH_OVER({flash}>{FLASH_BUDGET_BYTES})')
 
     for name, nbytes in sizes.get('appvars', {}).items():
         if nbytes > MAX_APPVAR_BYTES:
@@ -178,5 +179,5 @@ def validate_or_raise(sizes):
     ok, reasons = check_budget(sizes)
     if not ok:
         raise BudgetError(
-            'model exceeds Ti-84 Plus CE RAM budget: ' + ', '.join(reasons)
+            'model exceeds Ti-84 Plus CE memory budget: ' + ', '.join(reasons)
         )

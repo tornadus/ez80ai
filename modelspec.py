@@ -20,7 +20,9 @@ train and build.
 
 What stays FIXED (the task, not a model knob; validated, never configured):
   * the 43-char output charset incl. EOS (train.CHARSET) → num_classes == 43
-  * integer-only inference, the 150 KB RAM budget, the in-sample IntAcc metric
+  * integer-only inference, the calculator memory budgets (flash-resident
+    weights vs sizes.FLASH_BUDGET_BYTES, program vs RAM), the in-sample IntAcc
+    metric
 
 Bucket counts must be powers of two: the eZ80 tokenizer masks with `and (n-1)`.
 """

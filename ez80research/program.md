@@ -112,14 +112,14 @@ mirror of the sim (pure argmax + dual bias, full 24-bit counters). If you change
 2. **Must export and build end-to-end with zero errors.** The harness runs the
    real `exportmodel.py` then `buildchat84.py`. A model that doesn't build is
    not a model.
-3. **Must fit the calculator's RAM.** AppVars are unarchived into RAM at
-   runtime, so program code + ALL packed weights + working buffers must fit in
-   ~150 KB of RAM (`sizes.RAM_BUDGET_BYTES`). This is the binding constraint and
-   the one you'll fight most — the baseline already uses ~143 KB, so there's
-   little headroom. (The .8xv format also caps each AppVar at 65535 bytes, but a
-   layer may be split across as many AppVars as needed, so that is a build-layout
-   detail — RAM is what bounds feasibility.) Enforced against the build's real
-   printed sizes.
+3. **Must fit the calculator's memory budgets.** Weight AppVars live in
+   ARCHIVED FLASH and are read in place at runtime, so packed weights are gated
+   against `sizes.FLASH_BUDGET_BYTES` (1.5 MB — generous, but not unlimited).
+   The program image (code + working buffers) must fit
+   `sizes.RAM_BUDGET_BYTES`; it sits far below that in practice. (The .8xv
+   format also caps each AppVar at 65535 bytes, but a layer may be split across
+   as many AppVars as needed, so that is a build-layout detail.) Enforced
+   against the build's real printed sizes.
 4. **Fixed output contract (the TASK).** Output charset stays the exact 43 chars
    incl. EOS (`train.CHARSET`); do NOT shrink the output space. Input ENCODING is
    now a degree of freedom (see Levers), but you cannot game the metric with it:
