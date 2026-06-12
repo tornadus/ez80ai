@@ -508,7 +508,7 @@ class eZ80Builder:
     # .LIS / .SIS prefixed instructions — REGISTER-ONLY forms.
     # Used for 16-bit math in the inference core.
     #
-    # Per CEmu (see caveat #2 in the header / CAVEAT_AUDIT.md), every
+    # Per CEmu (see caveat #2 in the module header), every
     # suffixed instruction that touches memory or the stack executes in
     # Z80 mode: data addresses become {MBASE, addr16} and pushes/pops use
     # the SPS stack. Those forms can never address program data in an ADL
