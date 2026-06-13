@@ -76,7 +76,8 @@ DEFAULT_SPEC = {
     # --- training hyperparameters ---
     "lr": 0.002,
     "batch_size": 3072,
-    "epochs": 300,
+    "epochs": 900,                           # default schedule: 900 total, ramp ends @300
+                                             # (metadata only — the CLI --epochs drives training)
     "weight_decay": 1e-4,                    # LOAD-BEARING for quantization (do not 0)
     "optimizer": "adam",
     "quant_loss_weight": 0.25,

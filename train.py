@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """
-Training script for NEOCHAT — 512->512->256 architecture with dual output biases.
+Training script for NEOCHAT — architecture from modelspec.DEFAULT_SPEC
+(currently 1024->1600->1408->896->43) with dual output biases.
 
   - Output charset: 43 chars (space, digits, letters, punctuation + EOS)
   - Dual bias sets: separate biases for first 3 chars vs rest of response
   - 24-bit integer simulation matching eZ80 hardware
 
-Usage:
-    python3 train.py -f training_data.txt --epochs 300 --save-best --chat
+Usage (default schedule: 900 epochs, quantization ramp ends at epoch 300):
+    python3 train.py -f training_data.txt --epochs 900 --save-best --quant-target 300
 
 Resuming is automatic: if neochat_model.pt exists with a matching architecture it
 is loaded and training continues (pass a high --quant-target so the QT ramp / LR
@@ -363,7 +364,7 @@ def get_device():
     return torch.device('cpu')
 
 
-def train(epochs=300, lr=0.002, save_best=False, batch_size=8192, quant_target_epoch=300):
+def train(epochs=900, lr=0.002, save_best=False, batch_size=8192, quant_target_epoch=300):
     """Train NEOCHAT model with mini-batch SGD."""
     print("=" * 60)
     print("NEOCHAT Training — Dual Bias, 24-bit eZ80 Mode")
@@ -689,7 +690,7 @@ if __name__ == '__main__':
     import argparse
 
     parser = argparse.ArgumentParser(description='Train NEOCHAT (dual bias, 24-bit eZ80)')
-    parser.add_argument('--epochs', '-e', type=int, default=300, help='Training epochs')
+    parser.add_argument('--epochs', '-e', type=int, default=900, help='Training epochs')
     parser.add_argument('--file', '-f', type=str, help='Training data file (default: stdin)')
     parser.add_argument('--batch-size', '-b', type=int, default=8192, help='Mini-batch size')
     parser.add_argument('--lr', type=float, default=0.002, help='Learning rate')

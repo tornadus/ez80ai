@@ -13,7 +13,7 @@ If you like this project, please show some appreciation for those two as well. T
 ### Get Started
 Binaries can be found in the releases. Inside the archive you'll find:
 - **NEOCHAT.8XP**: The engine. This is what you run to actually start chatting.
-- **NEOA-D.8XV**: These are the model weights. They're too large to be stored within the executable, so they're APPVARs instead. They live in **archived flash** and are read in place — they never take up your RAM.
+- **NEO\*.8XV** (a set of AppVars named NEOA, NEOB, …): These are the model weights. They're too large to be stored within the executable, so they're APPVARs instead — the exact count depends on the model size. Transfer all of them. They live in **archived flash** and are read in place — they never take up your RAM.
 
 I highly recommend that you have ample flash (~1.5 MB) available. RAM needs are tiny (the program itself is a few KB).
 
@@ -32,7 +32,7 @@ python3 prepare_data.py                 # downloads nq_open, writes training_dat
 python3 train.py -f training_data.txt --epochs 900 --save-best --quant-target 300
                                          # -> neochat_model.pt (~50 min on an Arc Pro B50)
 python3 exportmodel.py                   # neochat_model.pt -> model.npz
-python3 buildchat84.py --model model.npz # -> bin/NEOCHAT.8xp + NEOA-V.8xv
+python3 buildchat84.py --model model.npz # -> bin/NEOCHAT.8xp + NEO*.8xv weight AppVars
 python3 test_model.py                    # sanity checks on the trained model
 python3 test_faithfulness.py             # asserts the eZ80 build mirrors the Python sim
 ```
